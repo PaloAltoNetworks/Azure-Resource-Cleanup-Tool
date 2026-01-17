@@ -88,7 +88,7 @@ sudo dnf install -y jq
 1. **Download the script**:
 
 ```bash
-curl -fsslO https://raw.githubusercontent.com/PAN-SSMT/Azure-Resource-Cleanup-Tool/refs/heads/main/azure-cleanup-tool.sh && chmod +x azure-cleanup-tool.sh
+curl -fsslO https://raw.githubusercontent.com/PaloAltoNetworks/Azure-Resource-Cleanup-Tool/refs/heads/main/azure-cleanup-tool.sh && chmod +x azure-cleanup-tool.sh
 ```
 
 2. **Verify prerequisites**:
