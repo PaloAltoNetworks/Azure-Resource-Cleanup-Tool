@@ -22,6 +22,10 @@ This comprehensive Bash script automates the discovery and safe deletion of Cort
 - **🎯 Multi-Resource Support**: Handles 15+ Azure resource types
 - **⚡ Edge Case Handling**: Manages 'Unknown' role assignments, scope mismatches, and orphaned resources
 - **⚡ Performance Optimizations**: Faster discovery across large environments
+- **🔍 Advanced Resource Group Targeting**: Supports with/without wildcard-based resource group targeting with enhanced exclusion logic
+- **⚙️ Service Type Exclusion Control**: Exclude entire categories of resources from discovery
+- **🔄 Subscription Filtering Enhancements**: Skip specific subscriptions from discovery
+- **🛡️ Enhanced Exclusion System** Automatically skips entire resource groups if they contain excluded resources and add new exclusions during confirmation prompts without restarting
 - **📊 Audit Logging**: Comprehensive logging for compliance and troubleshooting
 
 ## 📋 Supported Resource Types
@@ -124,99 +128,60 @@ az login --tenant <your-tenant-id>
 
 ## 🎯 Usage
 
-### Basic Name Pattern Search
+### **Example:**
 
 ```bash
-# Single pattern search (dry-run by default)
-bash azure-cleanup-tool.sh "cortex"
-
-# Single pattern search with --dry-run
-bash azure-cleanup-tool.sh "cortex" --dry-run
-
-# Search in specific subscription
-bash azure-cleanup-tool.sh "cortex" --subscription 12345-67890 --dry-run
-
-# Actual deletion (use with caution!)
-bash azure-cleanup-tool.sh "cortex" --delete
+  bash azure-cleanup-tool.sh <resource-name> [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--log-file FILE] [--append-log] [--help]
+  bash azure-cleanup-tool.sh <pattern1,pattern2,...> [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--log-file FILE] [--append-log]
+  bash azure-cleanup-tool.sh --tag KEY[=VALUE] [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--log-file FILE] [--append-log] [--help]
 ```
 
-### Multi Name Pattern Search (matches ANY of the patterns)
+| Option                   | Purpose                                                               | Example / Behavior                                                                                                                                |
+| ------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<resource-name>`        | Search pattern (case-insensitive). Supports comma-separated patterns. | `"cortex,ADSConnector,ADSGallery,ADSOutpost,monitor"` matches ANY listed pattern                                                                  |
+| `--dry-run`              | Preview resources that would be deleted (default mode).               | Safe, non-destructive execution                                                                                                                   |
+| `--delete`               | Perform actual deletion of matched resources.                         | Executes real cleanup (disables dry-run)                                                                                                          |
+| `--tag KEY[=VALUE]`      | Filter by tag key, exact key-value pair, or value.                    | `env` - matches tag key, `env=prod` - matches exact key-value pair, `prod` - matches tag value                                                    |
+| `--resource-group`       | Limit discovery/deletion to specific resource group(s).               | Comma-separated RG names                                                                                                                          |
+| `--subscription`         | Restrict search to a specific subscription.                           | Targets one Azure subscription                                                                                                                    |
+| `--exclude-subscription` | Exclude one or more subscriptions from scanning.                      | Comma-separated subscription IDs                                                                                                                  |
+| `--exclude`              | Skip specific resource names (exact match, case-sensitive).           | Protect critical resources                                                                                                                        |
+| `--exclude-service`      | Skip scanning specific Azure service categories entirely.             | Available types: `resources`, `resourcegroups`, `policies`, `roles`, `diagnostics`, `serviceprincipals`, `managementgroups`, `subscriptions` etc. |
+| `--log-file FILE`        | Write detailed audit logs to a specified output file.                 | Supports compliance & traceability                                                                                                                |
+| `--append-log`           | Append logs instead of overwriting existing file.                     | Preserve historical cleanup logs                                                                                                                  |
+| `--help`                 | Display CLI help message and exit.                                    | Show usage reference                                                                                                                              |
+
+**📌 Command Scenarios**
+
+| Scenario                                      | Example Command                                                                                                              | Outcome                                                          |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Preview cleanup by single name                | `bash azure-cleanup-tool.sh "cortex"`                                                                                        | Lists resources that match the name pattern (dry-run by default) |
+| Preview cleanup with explicit dry-run         | `bash azure-cleanup-tool.sh "cortex" --dry-run`                                                                              | Shows what would be deleted without making changes               |
+| Target a specific subscription                | `bash azure-cleanup-tool.sh "cortex" --subscription "12345-67890" --dry-run`                                                   | Limits scanning to one Azure subscription                        |
+| Exclude specific subscription(s)              | `bash azure-cleanup-tool.sh "cortex" --exclude-subscription "1111-2222,3333-4444" --dry-run`                                   | Skips scanning excluded subscriptions                            |
+| Limit cleanup to specific resource group(s)   | `bash azure-cleanup-tool.sh "cortex" --resource-group "rg-prod,rg-dev" --dry-run`                                            | Restricts discovery and deletion to selected RGs                 |
+| Delete resources by name                      | `bash azure-cleanup-tool.sh "cortex" --delete`                                                                               | Permanently deletes matching resources                           |
+| Multi-pattern name search (ANY match)         | `bash azure-cleanup-tool.sh "cortex,ADSConnector,ADSGallery,ADSOutpost"`                                                     | Matches any of the provided patterns                             |
+| Multi-pattern dry-run                         | `bash azure-cleanup-tool.sh "cortex,ADSConnector,ADSGallery,ADSOutpost" --dry-run`                                           | Previews matched resources                                       |
+| Delete resources using multiple patterns      | `bash azure-cleanup-tool.sh "cortex,ADSConnector,ADSGallery,ADSOutpost" --delete`                                            | Deletes resources matching any pattern                           |
+| Filter by tag key                             | `bash azure-cleanup-tool.sh --tag "managed_by" --dry-run`                                                                    | Finds resources with the given tag key                           |
+| Filter by tag key-value                       | `bash azure-cleanup-tool.sh --tag "managed_by=paloaltonetworks" --dry-run`                                                   | Finds resources with exact tag match                             |
+| Filter by tag value only                      | `bash azure-cleanup-tool.sh --tag "paloaltonetworks" --dry-run`                                                              | Finds resources matching tag value                               |
+| Delete tagged resources                       | `bash azure-cleanup-tool.sh --tag "paloaltonetworks" --delete`                                                               | Deletes resources based on tag filters                           |
+| Exclude specific resource names (exact match) | `bash azure-cleanup-tool.sh "cortex,ADSConnector,ADSGallery,ADSOutpost" --dry-run --exclude "cortex-scan-platform"`            | Prevents deletion of protected resources                         |
+| Exclude multiple resource names               | `bash azure-cleanup-tool.sh "cortex,ADSConnector,ADSGallery,ADSOutpost" --dry-run --exclude "cortex-scan-platform,production"` | Protects multiple critical resources                             |
+| Exclude Azure service categories              | `bash azure-cleanup-tool.sh "cortex" --exclude-service "resources,resourcegroups,roles"`                                       | Skips scanning selected service types                            |
+| Exclude governance & identity services        | `bash azure-cleanup-tool.sh "cortex" --exclude-service "serviceprincipals"`                                                    | Avoids scanning governance-related resources                     |
+| Write audit logs to a file                    | `bash azure-cleanup-tool.sh "cortex" --dry-run --log-file "audit.log"`                                                       | Saves cleanup activity for compliance                            |
+| Append logs instead of overwriting            | `bash azure-cleanup-tool.sh "cortex" --dry-run --log-file "audit.log" --append-log`                                          | Preserves historical cleanup records                             |
+| Display CLI help                              | `bash azure-cleanup-tool.sh --help`                                                                                          | Shows help and usage documentation                               |
+
+### **🚀 Advanced Example — All Features Combined**
 
 ```bash
-# Multi pattern search (dry-run by default)
-bash azure-cleanup-tool.sh "cortex,ads"
-
-# Multi pattern search with --dry-run
-bash azure-cleanup-tool.sh "cortex,ads" --dry-run
-
-# Search in specific subscription
-bash azure-cleanup-tool.sh "cortex,ads" --subscription 12345-67890 --dry-run
-
-# Actual deletion (use with caution!)
-bash azure-cleanup-tool.sh "cortex,ads" --delete
+# Advanced pattern matching with all features
+bash azure-cleanup-tool.sh "cortex,ADSConnector,ADSGallery,ADSOutpost" --dry-run --resource-group "cortex-onboarding-*,cortex-m*" --exclude-service "serviceprincipals"  --exclude "cortex-scan-platform,production" --log-file "audit.log"
 ```
-
-### Tag-Based Search
-
-```bash
-# Search by tag key only
-bash azure-cleanup-tool.sh --tag "managed_by" --dry-run
-
-# Search by exact key-value pair
-bash azure-cleanup-tool.sh --tag "managed_by=paloaltonetworks" --dry-run
-
-# Search by tag value only
-bash azure-cleanup-tool.sh --tag "paloaltonetworks" --dry-run
-
-# Delete tagged resources
-bash azure-cleanup-tool.sh --tag "paloaltonetworks" --delete
-```
-
-### Exclusion Patterns
-
-```bash
-# Exclude specific resource
-bash azure-cleanup-tool.sh "cortex" --dry-run --exclude cortex-scan-platform
-
-# Multiple exclusions with batch operations
-bash azure-cleanup-tool.sh "cortex,ads" --dry-run --exclude cortex-scan-platform,production
-
-# Combine all features
-bash azure-cleanup-tool.sh -tag "paloaltonetworks" --delete --exclude cortex-scan-platform,production,backup
-```
-
-### Comprehensive Audit Trail
-
-```bash
-# Create detailed audit log with all execution details by default it's Overwrite mode (new log each time in file)
-bash azure-cleanup-tool.sh "cortex,ads" --dry-run --log-file "audit.log"
-bash azure-cleanup-tool.sh "cortex,ads" --dry-run --log-file "audit-$(date +%Y%m%d-%H%M%S).log"
-
-# Append mode (Append to existing log file instead of overwriting)
-bash azure-cleanup-tool.sh "cortex,ads" --delete --log-file "audit.log" --append-log
-
-```
-
-### Help message
-
-```bash
-# Show help message
-bash azure-cleanup-tool.sh --help
-```
-
-### Command Line Options
-
-| Option              | Description                                                                                                                                 | Default                   | Required With                            | Example                      |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------- | ---------------------------- |
-| `<resource-name>`   | Search pattern (case-insensitive). Use commas for multiple patterns (e.g., `cortex,ads,test`)                                               | -                         | Use **either** this OR `--tag`           | "cortex,ads,monitor"         |
-| `--tag KEY[=VALUE]` | Search by tag in three ways: <br>• `KEY` - matches tag key<br>• `KEY=VALUE` - matches exact key-value pair<br>• `VALUE` - matches tag value | -                         | Use **either** this OR `<resource-name>` | --tag "paloaltonetworks"     |
-| `--dry-run`         | Only show what would be deleted (no actual deletion)                                                                                        | Enabled                   | Optional                                 | --dry-run                    |
-| `--delete`          | Actually delete resources (requires confirmation)                                                                                           | Dry-run mode              | Optional                                 | --delete                     |
-| `--subscription`    | Limit search to specific subscription ID                                                                                                    | All enabled subscriptions | Optional                                 | --subscription "12345-67890" |
-| `--exclude`         | Comma-separated patterns/names to exclude from deletion (e.g., `production,backup,monitor`)                                                 | -                         | Optional                                 | --exclude "prod,backup"      |
-| `--log-file FILE`   | Write audit log to file                                                                                                                     | -                         | Optional                                 | --log-file audit.log         |
-| `--append-log`      | continuous log for multiple executions                                                                                                      | -                         | Optional                                 | --append-log                 |
-| `--help`            | Show help message                                                                                                                           | -                         | Optional                                 | --help                       |
 
 ## 🔧 How It Works
 
@@ -446,7 +411,6 @@ bash -x azure-cleanup-tool.sh "<resource-name>" --dry-run
 ## 🤝 Contributing
 
 We welcome contributions! Please feel free to submit issues, feature requests, or pull requests.
-
 
 ## ⚠️ Disclaimer
 
