@@ -1664,9 +1664,8 @@ discover_role_assignments_for_custom_roles() {
     # --- Get custom roles matching any of our patterns ---
     local custom_roles=""
     for pattern in "${NAME_PATTERNS[@]}"; do
-        local sanitized_pattern=$(printf '%s' "$pattern" | sed "s/'/''/g")
         local matches
-        matches=$(az role definition list --custom-role-only true --query "[?contains(roleName, '$sanitized_pattern')].name" -o tsv 2>/dev/null || echo "")
+        matches=$(az role definition list --custom-role-only true -o json 2>/dev/null | jq -r ".[] | select(.roleName | test(\"$pattern\"; \"i\")) | .name")
         if [[ -n "$matches" ]]; then
             custom_roles+="$matches"$'\n'
         fi
