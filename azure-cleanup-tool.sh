@@ -413,6 +413,35 @@ fi
 
 log_success "Azure login confirmed"
 
+# --- Performance Configuration ---
+MAX_PARALLEL=${MAX_PARALLEL:-20}  # Max parallel background jobs for diagnostic settings
+
+# --- Subscription Name Cache ---
+declare -A SUB_NAME_CACHE=()
+
+cache_subscription_names() {
+    log_debug "Caching subscription names..."
+    local subs_json
+    subs_json=$(az account list --query '[?state==`Enabled`].{id:id, name:name}' -o json 2>/dev/null || echo '[]')
+    while IFS=$'\t' read -r sub_id sub_name; do
+        [[ -z "$sub_id" ]] && continue
+        SUB_NAME_CACHE["$sub_id"]="$sub_name"
+    done < <(echo "$subs_json" | jq -r '.[] | "\(.id)\t\(.name)"')
+    log_debug "Cached ${#SUB_NAME_CACHE[@]} subscription names"
+}
+
+get_sub_name() {
+    local sub="$1"
+    if [[ -n "${SUB_NAME_CACHE[$sub]+_}" ]]; then
+        echo "${SUB_NAME_CACHE[$sub]}"
+    else
+        local name
+        name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null || echo "Unknown")
+        SUB_NAME_CACHE["$sub"]="$name"
+        echo "$name"
+    fi
+}
+
 # --- Initialize Arrays ---
 declare -a ALL_IDS=()
 declare -a SUMMARY_ROWS=()
@@ -796,6 +825,149 @@ discover_resource_groups() {
     done < <(jq -c '.[]' <<< "$rgs")
 }
 
+# --- Fast Resource Discovery via Azure Resource Graph ---
+# Replaces per-subscription az resource list with a single cross-subscription query
+discover_resources_via_graph() {
+    if is_service_excluded "resources"; then
+        log_debug "Skipping resource discovery (excluded via --exclude-service)"
+        return 0
+    fi
+
+    # Check if az graph extension is available
+    if ! az graph query -q "Resources | limit 1" --first 1 &>/dev/null 2>&1; then
+        log_warning "Azure Resource Graph not available. Install with: az extension add --name resource-graph"
+        log_warning "Falling back to per-subscription discovery (slower)..."
+        return 1
+    fi
+
+    log_info "Searching resources across all subscriptions using Resource Graph (fast mode)..."
+
+    # Build KQL name filter from patterns
+    local kql_conditions=""
+    for pattern in "${NAME_PATTERNS[@]}"; do
+        local escaped_pattern=$(printf '%s' "$pattern" | sed "s/'/''/g")
+        if [[ -n "$kql_conditions" ]]; then
+            kql_conditions="$kql_conditions or name contains '$escaped_pattern'"
+        else
+            kql_conditions="name contains '$escaped_pattern'"
+        fi
+    done
+
+    [[ -z "$kql_conditions" ]] && return 1
+
+    # Build subscription scope args
+    local sub_args=""
+    if [[ -n "$SUBSCRIPTION_ID" ]]; then
+        sub_args="--subscriptions $SUBSCRIPTION_ID"
+    fi
+
+    # --- Query regular resources ---
+    local query="Resources | where $kql_conditions | where type !contains 'microsoft.authorization/roledefinitions' | project name, type, id, resourceGroup, subscriptionId, tags, location"
+    local results
+    results=$(az graph query -q "$query" --first 1000 $sub_args -o json 2>/dev/null || echo '{"data":[]}')
+
+    local data
+    data=$(echo "$results" | jq -c '.data // .[] // []' 2>/dev/null)
+
+    while IFS= read -r row; do
+        [[ -z "$row" || "$row" == "null" ]] && continue
+
+        local name type id rg sub_id tags
+        name=$(jq -r '.name // ""' <<< "$row")
+        type=$(jq -r '.type // ""' <<< "$row")
+        id=$(jq -r '.id // ""' <<< "$row")
+        rg=$(jq -r '.resourceGroup // ""' <<< "$row")
+        sub_id=$(jq -r '.subscriptionId // ""' <<< "$row")
+        tags=$(jq -r 'if .tags then (.tags | to_entries | map("\(.key)=\(.value)") | join(", ")) else "" end' <<< "$row")
+
+        # Apply exclude subscription filter
+        if [[ ${#EXCLUDE_SUBSCRIPTION_ARRAY[@]} -gt 0 ]]; then
+            local skip=false
+            for excl in "${EXCLUDE_SUBSCRIPTION_ARRAY[@]}"; do
+                [[ "$sub_id" == "$excl" ]] && skip=true && break
+            done
+            [[ "$skip" == true ]] && continue
+        fi
+
+        # Apply resource group filter if specified
+        if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]] && [[ -n "$rg" ]]; then
+            if ! matches_resource_group "$rg" >/dev/null; then
+                continue
+            fi
+        fi
+
+        # Skip duplicates
+        if [[ " ${ALL_IDS[@]} " =~ " ${id} " ]]; then
+            continue
+        fi
+
+        local sub_name=$(get_sub_name "$sub_id")
+
+        echo "  → Found Resource: $(highlight_matches "$name") ($type) in RG: $rg"
+        log_to_file "FOUND" "Resource: $name ($type) in subscription: $sub_name, RG: $rg"
+        SUMMARY_ROWS+=("$name|$type|$sub_name|RG: $rg, Tags: $tags")
+        ALL_IDS+=("$id")
+        RESOURCE_TYPES+=("$id|$type")
+        RESOURCE_DETAILS+=("$id|$name|$type|$sub_name|$rg")
+        RESOURCES_FOUND=true
+    done < <(jq -c '.[]' <<< "$data" 2>/dev/null)
+
+    # --- Query resource groups ---
+    if ! is_service_excluded "resourcegroups"; then
+        local rg_query="ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' | where $kql_conditions | project name, id, subscriptionId, tags, location"
+        local rg_results
+        rg_results=$(az graph query -q "$rg_query" --first 1000 $sub_args -o json 2>/dev/null || echo '{"data":[]}')
+
+        local rg_data
+        rg_data=$(echo "$rg_results" | jq -c '.data // .[] // []' 2>/dev/null)
+
+        while IFS= read -r row; do
+            [[ -z "$row" || "$row" == "null" ]] && continue
+
+            local name id sub_id tags location
+            name=$(jq -r '.name // ""' <<< "$row")
+            id=$(jq -r '.id // ""' <<< "$row")
+            sub_id=$(jq -r '.subscriptionId // ""' <<< "$row")
+            tags=$(jq -r 'if .tags then (.tags | to_entries | map("\(.key)=\(.value)") | join(", ")) else "" end' <<< "$row")
+            location=$(jq -r '.location // ""' <<< "$row")
+
+            # Apply exclude subscription filter
+            if [[ ${#EXCLUDE_SUBSCRIPTION_ARRAY[@]} -gt 0 ]]; then
+                local skip=false
+                for excl in "${EXCLUDE_SUBSCRIPTION_ARRAY[@]}"; do
+                    [[ "$sub_id" == "$excl" ]] && skip=true && break
+                done
+                [[ "$skip" == true ]] && continue
+            fi
+
+            # Apply resource group filter
+            if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]]; then
+                if ! matches_resource_group "$name" >/dev/null; then
+                    continue
+                fi
+            fi
+
+            if [[ " ${ALL_IDS[@]} " =~ " ${id} " ]]; then
+                continue
+            fi
+
+            local sub_name=$(get_sub_name "$sub_id")
+
+            echo "  → Found Resource Group: $(highlight_matches "$name") (Location: $location)"
+            log_to_file "FOUND" "Resource Group: $name in subscription: $sub_name, Location: $location"
+            SUMMARY_ROWS+=("$name|ResourceGroup|$sub_name|Location: $location, Tags: $tags")
+            ALL_IDS+=("$id")
+            RESOURCE_TYPES+=("$id|ResourceGroup")
+            RG_SUBSCRIPTION+=("$id|$sub_id")
+            RESOURCE_DETAILS+=("$id|$name|ResourceGroup|$sub_name|$location")
+            RESOURCES_FOUND=true
+        done < <(jq -c '.[]' <<< "$rg_data" 2>/dev/null)
+    fi
+
+    log_success "Resource Graph discovery completed"
+    return 0
+}
+
 # --- Resource Discovery Functions ---
 discover_resources() {
     local sub="$1"
@@ -899,10 +1071,7 @@ discover_resources_by_tag() {
         [[ -z "$sub" ]] && continue
         
         local sub_name
-        sub_name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null || echo "Unknown")
-        if [[ "$sub_name" == "Unknown" ]]; then
-            sub_name=$(az account list --query "[?id=='$sub'].name | [0]" -o tsv 2>/dev/null || echo "Subscription-$sub")
-        fi
+        sub_name=$(get_sub_name "$sub")
         
         log_info "Searching tagged resources in subscription: $sub_name"
         
@@ -1054,10 +1223,7 @@ discover_resources_in_specific_rgs() {
         [[ -z "$sub" ]] && continue
         
         local sub_name
-        sub_name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null || echo "Unknown")
-        if [[ "$sub_name" == "Unknown" ]]; then
-            sub_name=$(az account list --query "[?id=='$sub'].name | [0]" -o tsv 2>/dev/null || echo "Subscription-$sub")
-        fi
+        sub_name=$(get_sub_name "$sub")
         
         log_info "Checking subscription: $sub_name"
         
@@ -1197,61 +1363,95 @@ discover_diagnostic_settings() {
         return
     fi
     
-    log_info "Searching for diagnostic settings..."
+    log_info "Searching for diagnostic settings (parallel mode, max ${MAX_PARALLEL} concurrent)..."
     
     local subscriptions
     subscriptions=$(get_subscriptions)
+    
+    # --- Phase 1: Resource-level diagnostic settings (PARALLELIZED) ---
+    local diag_tmp
+    diag_tmp=$(mktemp -d)
     
     while IFS= read -r sub; do
         [[ -z "$sub" ]] && continue
         
         local sub_name
-        sub_name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null || echo "Unknown")
-        if [[ "$sub_name" == "Unknown" ]]; then
-            sub_name=$(az account list --query "[?id=='$sub'].name | [0]" -o tsv 2>/dev/null || echo "Subscription-$sub")
-        fi
+        sub_name=$(get_sub_name "$sub")
         
         log_debug "Checking diagnostic settings in subscription: $sub_name"
         
         local resources
         resources=$(az resource list --subscription "$sub" --query '[].id' -o tsv 2>/dev/null || echo "")
         
-        for resource_id in $resources; do
+        [[ -z "$resources" ]] && continue
+        
+        # Pre-filter resources by resource group (in parent shell, before spawning jobs)
+        local filtered_resources=()
+        while IFS= read -r resource_id; do
             [[ -z "$resource_id" ]] && continue
             
-            # Extract resource group from resource ID
             local resource_group=""
             if [[ "$resource_id" =~ /resourceGroups/([^/]+)/ ]]; then
                 resource_group="${BASH_REMATCH[1]}"
             fi
             
-            # --- Skip if resource group filtering is enabled and doesn't match --- 
             if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]] && [[ -n "$resource_group" ]]; then
-                if ! matches_resource_group "$resource_group"; then
+                if ! matches_resource_group "$resource_group" >/dev/null; then
                     continue
                 fi
             fi
             
-            local diagnostic_settings
-            diagnostic_settings=$(az monitor diagnostic-settings list --resource "$resource_id" -o json 2>/dev/null || echo '[]')
+            filtered_resources+=("$resource_id")
+        done <<< "$resources"
+        
+        [[ ${#filtered_resources[@]} -eq 0 ]] && continue
+        
+        log_debug "Checking ${#filtered_resources[@]} resources for diagnostic settings in $sub_name (${MAX_PARALLEL} parallel)..."
+        
+        # Process in parallel batches
+        local batch_count=0
+        for resource_id in "${filtered_resources[@]}"; do
+            (
+                local my_pid=$BASHPID
+                local diag_settings
+                diag_settings=$(az monitor diagnostic-settings list --resource "$resource_id" -o json 2>/dev/null || echo '[]')
+                
+                # Extract matching settings and write to temp file
+                echo "$diag_settings" | jq -c --arg rid "$resource_id" --arg sname "$sub_name" \
+                    '.[]? | {name: .name, id: .id, resourceId: $rid, subName: $sname}' \
+                    2>/dev/null > "$diag_tmp/r_${my_pid}.jsonl"
+            ) &
             
-            if ! jq -e '. | type == "array"' <<< "$diagnostic_settings" >/dev/null 2>&1; then
-                continue
+            ((batch_count++))
+            if [[ $batch_count -ge $MAX_PARALLEL ]]; then
+                wait
+                batch_count=0
             fi
+        done
+        wait  # Wait for remaining jobs in this subscription
+    done <<< "$subscriptions"
+    
+    # Merge results from all parallel jobs
+    local diag_found=0
+    for result_file in "$diag_tmp"/r_*.jsonl; do
+        [[ -f "$result_file" ]] || continue
+        [[ -s "$result_file" ]] || continue  # Skip empty files
+        
+        while IFS= read -r setting; do
+            [[ -z "$setting" || "$setting" == "null" ]] && continue
             
-            while IFS= read -r setting; do
-                [[ -z "$setting" ]] && continue
-                
-                local name id target_resource
-                name=$(jq -r '.name // ""' <<< "$setting")
-                id=$(jq -r '.id // ""' <<< "$setting")
-                target_resource=$(jq -r '.resourceId // ""' <<< "$setting")
-                
-                [[ -z "$name" || -z "$id" ]] && continue
-                
-                # --- Multi-pattern matching ---
-                local matched_pattern
-                if matched_pattern=$(matches_any_pattern "$name"); then
+            local name id target_resource sub_name
+            name=$(jq -r '.name // ""' <<< "$setting")
+            id=$(jq -r '.id // ""' <<< "$setting")
+            target_resource=$(jq -r '.resourceId // ""' <<< "$setting")
+            sub_name=$(jq -r '.subName // ""' <<< "$setting")
+            
+            [[ -z "$name" || -z "$id" ]] && continue
+            
+            # Multi-pattern matching
+            local matched_pattern
+            if matched_pattern=$(matches_any_pattern "$name"); then
+                if [[ ! " ${ALL_IDS[@]} " =~ " ${id} " ]]; then
                     echo "  → Found Diagnostic Setting: $(highlight_matches "$name") (Resource: $(basename "$target_resource"))"
                     log_to_file "FOUND" "Diagnostic Setting: $name (Resource: $(basename "$target_resource"))"
                     SUMMARY_ROWS+=("$name|DiagnosticSetting|$sub_name|Target: $(basename "$target_resource")")
@@ -1259,19 +1459,21 @@ discover_diagnostic_settings() {
                     RESOURCE_TYPES+=("$id|DiagnosticSetting")
                     RESOURCE_DETAILS+=("$id|$name|DiagnosticSetting|$sub_name|$target_resource")
                     RESOURCES_FOUND=true
+                    ((diag_found++))
                 fi
-            done < <(jq -c '.[]?' <<< "$diagnostic_settings")
-        done
-    done <<< "$subscriptions"
+            fi
+        done < "$result_file"
+    done
     
+    rm -rf "$diag_tmp"
+    log_debug "Found $diag_found resource-level diagnostic settings"
+    
+    # --- Phase 2: Subscription-level diagnostic settings (fast, no parallelism needed) ---
     while IFS= read -r sub; do
         [[ -z "$sub" ]] && continue
         
         local sub_name
-        sub_name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null || echo "Unknown")
-        if [[ "$sub_name" == "Unknown" ]]; then
-            sub_name=$(az account list --query "[?id=='$sub'].name | [0]" -o tsv 2>/dev/null || echo "Subscription-$sub")
-        fi
+        sub_name=$(get_sub_name "$sub")
         
         log_debug "Checking subscription-level diagnostic settings: $sub_name"
         
@@ -1436,13 +1638,7 @@ discover_policy_assignments() {
         [[ -z "$sub" ]] && continue
         
         local sub_name
-        sub_name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null)
-        if [[ $? -ne 0 ]] || [[ -z "$sub_name" ]]; then
-            sub_name=$(az account list --query "[?id=='$sub'].name | [0]" -o tsv 2>/dev/null)
-            if [[ $? -ne 0 ]] || [[ -z "$sub_name" ]]; then
-                sub_name="Subscription ($sub)"
-            fi
-        fi
+        sub_name=$(get_sub_name "$sub")
         
         log_debug "Checking policy assignments in subscription: $sub_name"
         local sub_assignments
@@ -1488,7 +1684,7 @@ discover_policy_remediations() {
         [[ -z "$sub" ]] && continue
         
         local sub_name
-        sub_name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null || echo "Unknown")
+        sub_name=$(get_sub_name "$sub")
         
         local remediations
         remediations=$(az policy remediation list --subscription "$sub" -o json 2>/dev/null || echo '[]')
@@ -2193,7 +2389,7 @@ init_logging() {
         echo "Tenant ID        : $tenant_id" >> "$LOG_FILE"
         
         if [[ -n "$SUBSCRIPTION_ID" ]]; then
-            local sub_name=$(az account show --subscription "$SUBSCRIPTION_ID" --query 'name' -o tsv 2>/dev/null || echo "$SUBSCRIPTION_ID")
+            local sub_name=$(get_sub_name "$SUBSCRIPTION_ID")
             echo "Subscription     : $SUBSCRIPTION_ID ($sub_name)" >> "$LOG_FILE"
         else
             echo "Subscription     : All enabled subscriptions" >> "$LOG_FILE"
@@ -2858,6 +3054,9 @@ main() {
     CURRENT_SUB=$(az account show --query id -o tsv)
     log_to_file "INFO" "Current subscription ID: $CURRENT_SUB"
     
+    # Cache subscription names upfront (avoids repeated az account show calls)
+    cache_subscription_names
+    
     # Get subscriptions
     local subscriptions
     subscriptions=$(get_subscriptions)
@@ -2876,21 +3075,40 @@ main() {
         # Skip regular resource discovery in subscription loop
         SKIP_REGULAR_DISCOVERY=true
     else
-        while IFS= read -r sub; do
-            if [[ -z "$sub" ]]; then
-                continue
+        # Try fast Resource Graph discovery first, fall back to per-subscription
+        local use_graph=false
+        if [[ ${#NAME_PATTERNS[@]} -gt 0 ]]; then
+            if discover_resources_via_graph; then
+                use_graph=true
             fi
-            
-            if az account set --subscription "$sub" >/dev/null 2>&1; then
+        fi
+        
+        if [[ "$use_graph" == true ]]; then
+            # Graph handled resources and RGs; still need per-sub role assignments
+            while IFS= read -r sub; do
+                [[ -z "$sub" ]] && continue
                 local sub_name
-                sub_name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null || echo "Unknown")
-                log_to_file "INFO" "Switched to subscription: $sub ($sub_name)"
-                discover_resources "$sub" "$sub_name"
+                sub_name=$(get_sub_name "$sub")
                 discover_subscription_role_assignments "$sub" "$sub_name"
-            else
-                log_info "Accessed subscription: $sub"
-            fi
-        done <<< "$subscriptions"
+            done <<< "$subscriptions"
+        else
+            # Fallback: per-subscription discovery (original behavior)
+            while IFS= read -r sub; do
+                if [[ -z "$sub" ]]; then
+                    continue
+                fi
+                
+                if az account set --subscription "$sub" >/dev/null 2>&1; then
+                    local sub_name
+                    sub_name=$(get_sub_name "$sub")
+                    log_to_file "INFO" "Switched to subscription: $sub ($sub_name)"
+                    discover_resources "$sub" "$sub_name"
+                    discover_subscription_role_assignments "$sub" "$sub_name"
+                else
+                    log_info "Accessed subscription: $sub"
+                fi
+            done <<< "$subscriptions"
+        fi
         SKIP_REGULAR_DISCOVERY=false
     fi
     
