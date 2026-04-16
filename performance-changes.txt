@@ -1,0 +1,20 @@
+Performance optimizations for azure-cleanup-tool.sh
+
+1. Subscription name caching
+   - Added an associative array (SUB_NAME_CACHE) that gets populated once at startup via cache_subscription_names()
+   - Added get_sub_name() helper that returns cached names instantly
+   - Replaced ~5 scattered az account show/list calls with get_sub_name()
+   - Saves ~1-2 seconds per call, adds up to 30-60s saved across a full run
+
+2. Azure Resource Graph discovery
+   - Added discover_resources_via_graph() function
+   - Uses a single "az graph query" to find resources and resource groups across all subscriptions at once
+   - Replaces the per-subscription loop of "az resource list" calls
+   - Falls back to original per-subscription method if the resource-graph extension isn't installed
+   - Requires: az extension add --name resource-graph
+
+3. Parallel diagnostic settings discovery
+   - Rewrote discover_diagnostic_settings() to run az monitor diagnostic-settings list calls as background jobs
+   - Up to 20 concurrent checks (configurable via MAX_PARALLEL env var)
+   - Results are written to temp files by each background job, then merged back into the main arrays
+   - Previously the single biggest bottleneck: one API call per resource, serially
