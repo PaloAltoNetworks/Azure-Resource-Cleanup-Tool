@@ -18,6 +18,7 @@ This comprehensive Bash script automates the discovery and safe deletion of Cort
 - **🔍 Comprehensive Discovery**: Searches across all Azure scopes for resources matching name patterns
 - **🛡️ Safety First**: Dry-run mode by default with explicit confirmation prompts
 - **🛡️ Smart Exclusion**: Protect critical resources from accidental deletion
+- ⚡ **Parallel diagnostics** – Fetches diagnostic settings concurrently (default 20 threads, tunable).
 - **🗑️ Safe Deletion**: Dependency-aware deletion order to prevent conflicts
 - **🎯 Multi-Resource Support**: Handles 15+ Azure resource types
 - **⚡ Edge Case Handling**: Manages 'Unknown' role assignments, scope mismatches, and orphaned resources
@@ -49,6 +50,7 @@ This comprehensive Bash script automates the discovery and safe deletion of Cort
 
 - **Bash**: Version 4.0 or higher (5.0+ recommended)
 - **Azure Cloud Shell-Bash** or (**Azure CLI**: Version 2.0 or higher)
+- **Azure CLI extension (To utilize the high-speed Resource Graph discovery, you must install the Azure CLI extension in Azure Cloud Shell-Bash/Azure CLI:)**: az extension add --name resource-graph
 - **jq**: JSON processor
 - **column**: Table formatting utility (usually pre-installed)
 
@@ -59,12 +61,14 @@ This comprehensive Bash script automates the discovery and safe deletion of Cort
 ```bash
 sudo apt-get update
 sudo apt-get install -y jq bash
+az extension add --name resource-graph
 ```
 
 #### macOS
 
 ```bash
 brew install jq
+az extension add --name resource-graph
 # Bash 5+ comes with modern macOS
 ```
 
@@ -72,9 +76,11 @@ brew install jq
 
 ```bash
 sudo yum install -y jq
+az extension add --name resource-graph
 
 # Or for newer versions:
 sudo dnf install -y jq
+az extension add --name resource-graph
 ```
 
 ### Azure Permissions
@@ -96,6 +102,17 @@ curl -fsslO https://raw.githubusercontent.com/PaloAltoNetworks/Azure-Resource-Cl
 ```
 
 2. **Verify prerequisites**:
+
+```bash
+# Check Resource Graph discovery version
+az extension show --name resource-graph
+# Should show: "version": "2.1.1"
+
+# To utilize the high-speed Resource Graph discovery, you must install the Azure CLI extension:
+az extension add --name resource-graph
+
+#If Resource Graph discovery shows an old version, run the following command:
+az extension update --name resource-graph
 
 ```bash
 # Check Bash version (If your Bash version is old, scroll down to "Troubleshooting" for installation instructions.)
@@ -347,6 +364,18 @@ bash azure-cleanup-tool.sh --dry-run
 # ✅ Correct - provide search criteria
 bash azure-cleanup-tool.sh "cortex" --dry-run
 bash azure-cleanup-tool.sh --tag "environment=dev" --dry-run
+```
+
+**"ERROR: Resource Graph extension not found"**
+```bash
+Run az extension add --name resource-graph
+```
+
+**"ERROR: (429) Too Many Requests"**
+```bash
+Reduce --max-parallel as follows: or wait a few minutes before retrying.
+export MAX_PARALLEL=10
+
 ```
 
 **"Subscription not found"**
