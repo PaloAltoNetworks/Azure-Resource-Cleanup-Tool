@@ -112,13 +112,9 @@ curl -fsslO https://raw.githubusercontent.com/PaloAltoNetworks/Azure-Resource-Cl
 az extension show --name resource-graph
 # Should show: "version": "2.1.1"
 
-# To utilize the high-speed Resource Graph discovery, you must install the Azure CLI extension:
-az extension add --name resource-graph
-
 #If Resource Graph discovery shows an old version, run the following command:
 az extension update --name resource-graph
 
-```bash
 # Check Bash version (If your Bash version is old, scroll down to "Troubleshooting" for installation instructions.)
 bash --version
 # Should show: GNU bash, version 4.x or 5.x
