@@ -54,7 +54,23 @@ This comprehensive Bash script automates the discovery and safe deletion of Cort
 - **jq**: JSON processor
 - **column**: Table formatting utility (usually pre-installed)
 
-### Installation Commands
+### Azure Permissions
+
+#### Required Azure Roles
+
+- **Owner** role is required on the Root Level
+
+#### Azure Entra Permissions
+
+- **Application Administrator** or **Global Administrator** (for Service Principals & Enterprise Apps)
+
+### 📥 Installation Commands
+
+#### Cloud Shell (Bash)
+
+```bash
+az extension add --name resource-graph
+```
 
 #### Ubuntu/Debian
 
@@ -82,18 +98,6 @@ az extension add --name resource-graph
 sudo dnf install -y jq
 az extension add --name resource-graph
 ```
-
-### Azure Permissions
-
-#### Required Azure Roles
-
-- **Owner** role is required on the Root Level
-
-#### Azure Entra Permissions
-
-- **Application Administrator** or **Global Administrator** (for Service Principals & Enterprise Apps)
-
-## 📥 Installation
 
 1. **Download the script**:
 
