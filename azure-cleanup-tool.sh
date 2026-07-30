@@ -296,6 +296,18 @@ if [[ -n "$NAME_PATTERN" ]]; then
     for i in "${!NAME_PATTERNS[@]}"; do
         NAME_PATTERNS[$i]=$(echo "${NAME_PATTERNS[$i]}" | xargs)
     done
+fi
+
+# === Changes: Forced addition of Cortex-specific roles that are always included in the deletion list ===
+if [[ ! "$NAME_PATTERN" =~ "ADSScannedAssetsRole" ]]; then
+    NAME_PATTERNS+=("ADSScannedAssetsRole-")
+fi
+if [[ ! "$NAME_PATTERN" =~ "automationRole" ]]; then
+    NAME_PATTERNS+=("automationRole-")
+fi
+# =================================================================
+
+if [[ ${#NAME_PATTERNS[@]} -gt 0 ]]; then
     log_special "Azure Resource Cleanup Tool"
     log_to_file "INFO" "Parsed ${#NAME_PATTERNS[@]} search pattern(s): ${NAME_PATTERNS[*]}"
 fi
