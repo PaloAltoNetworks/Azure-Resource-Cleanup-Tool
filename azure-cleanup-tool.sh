@@ -33,7 +33,7 @@ NC=$'\033[0m' # No Color
 declare -A SERVICE_TYPE_MAP=(
     ["resources"]="regular"  # Regular Azure resources
     ["resourcegroups"]="ResourceGroup"
-    ["policies"]="PolicyAssignment,PolicyRemediation"
+    ["policies"]="PolicyAssignment,PolicyRemediation,PolicyDefinition"
     ["roles"]="CustomRole,RoleAssignment,UnknownRoleAssignment"
     ["diagnostics"]="DiagnosticSetting,SubscriptionDiagnosticSetting,DirectoryDiagnosticSetting"
     ["serviceprincipals"]="EnterpriseApplication"
@@ -46,7 +46,7 @@ declare -A SERVICE_TYPE_MAP=(
 declare -A SERVICE_DISPLAY_NAMES=(
     ["resources"]="Regular Resources"
     ["resourcegroups"]="Resource Groups"
-    ["policies"]="Policy Assignments & Remediations"
+    ["policies"]="Policy Definitions, Assignments & Remediations"
     ["roles"]="Custom Roles & Role Assignments"
     ["diagnostics"]="Diagnostic Settings"
     ["serviceprincipals"]="Service Principals/Enterprise Apps"
@@ -58,7 +58,7 @@ declare -A SERVICE_DISPLAY_NAMES=(
 # --- Service Type Discovery Functions Mapping ---
 declare -A SERVICE_DISCOVERY_FUNCTIONS=(
     ["resourcegroups"]="discover_resource_groups discover_resource_groups_by_tag discover_resources_in_specific_rgs"
-    ["policies"]="discover_policy_assignments discover_policy_remediations"
+    ["policies"]="discover_policy_assignments discover_policy_remediations discover_policy_definitions"
     ["roles"]="discover_custom_roles_enhanced discover_role_assignments_for_custom_roles"
     ["diagnostics"]="discover_diagnostic_settings discover_directory_diagnostic_settings"
     ["serviceprincipals"]="discover_service_principals"
@@ -368,7 +368,7 @@ if [[ -n "$EXCLUDE_SERVICES" ]]; then
         # Map to resource types
         if [[ "$service_type" == "all" ]]; then
             # Exclude all service-specific types
-            EXCLUDED_RESOURCE_TYPES=("ResourceGroup" "PolicyAssignment" "PolicyRemediation"
+            EXCLUDED_RESOURCE_TYPES=("ResourceGroup" "PolicyAssignment" "PolicyRemediation" "PolicyDefinition"
                                      "CustomRole" "RoleAssignment" "UnknownRoleAssignment"
                                      "DiagnosticSetting" "SubscriptionDiagnosticSetting" "DirectoryDiagnosticSetting"
                                      "EnterpriseApplication" "ManagementGroupRoleAssignment"
@@ -1728,6 +1728,75 @@ discover_policy_remediations() {
     done <<< "$subscriptions"
 }
 
+# --- Policy Definitions Discovery ---
+discover_policy_definitions() {
+    # Skip if policies are excluded
+    if is_service_excluded "policies"; then
+        log_debug "Skipping policy definitions discovery (excluded via --exclude-service)"
+        return
+    fi
+
+    log_info "Searching for custom policy definitions..."
+
+    # 1. Search Management Groups
+    local mgs
+    mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null | tr -d '\r' || echo "")
+
+    for mg in $mgs; do
+        [[ -z "$mg" ]] && continue
+
+        # Only fetch Custom policies! Bypasses the 3,400+ BuiltIn policies.
+        local mg_definitions
+        mg_definitions=$(az policy definition list --management-group "$mg" --query "[?policyType=='Custom'].[displayName, name, id]" -o tsv 2>/dev/null | tr -d '\r' || echo "")
+
+        while IFS=$'\t' read -r displayName name id; do
+            [[ -z "$id" ]] && continue
+
+            # --- Multi-pattern matching ---
+            if matched_pattern=$(matches_any_pattern "$displayName") || matched_pattern=$(matches_any_pattern "$name"); then
+                echo "  → Found Management Group Policy Definition: $(highlight_matches "$displayName") (MG: $mg)"
+                log_to_file "FOUND" "Management Group Policy Definition: $displayName (MG: $mg, Name: $name)"
+                SUMMARY_ROWS+=("$displayName|PolicyDefinition|$mg|Name: $name")
+                ALL_IDS+=("$id")
+                RESOURCE_TYPES+=("$id|PolicyDefinition")
+                RESOURCE_DETAILS+=("$id|$displayName|PolicyDefinition|$mg|$name")
+                RESOURCES_FOUND=true
+            fi
+        done <<< "$mg_definitions"
+    done
+
+    # 2. Search Subscriptions
+    local subscriptions
+    subscriptions=$(get_subscriptions)
+
+    while IFS= read -r sub; do
+        [[ -z "$sub" ]] && continue
+
+        local sub_name
+        sub_name=$(get_sub_name "$sub")
+
+        # Only fetch Custom policies! Bypasses the 3,400+ BuiltIn policies.
+        local sub_definitions
+        sub_definitions=$(az policy definition list --subscription "$sub" --query "[?policyType=='Custom'].[displayName, name, id]" -o tsv 2>/dev/null | tr -d '\r' || echo "")
+
+        while IFS=$'\t' read -r displayName name id; do
+            [[ -z "$id" ]] && continue
+
+            # --- Multi-pattern matching ---
+            if matched_pattern=$(matches_any_pattern "$displayName") || matched_pattern=$(matches_any_pattern "$name"); then
+                echo "  → Found Subscription Policy Definition: $(highlight_matches "$displayName") (Sub: $sub_name)"
+                log_to_file "FOUND" "Subscription Policy Definition: $displayName (Sub: $sub_name, Name: $name)"
+                SUMMARY_ROWS+=("$displayName|PolicyDefinition|$sub_name|Name: $name")
+                ALL_IDS+=("$id")
+                RESOURCE_TYPES+=("$id|PolicyDefinition")
+                RESOURCE_DETAILS+=("$id|$displayName|PolicyDefinition|$sub_name|$name")
+                RESOURCES_FOUND=true
+            fi
+        done <<< "$sub_definitions"
+    done <<< "$subscriptions"
+}
+
+
 discover_management_group_deployments() {
     # Skip if management groups are excluded
     if is_service_excluded "managementgroups"; then
@@ -2235,6 +2304,41 @@ delete_policy_remediation() {
         return 0
     else
         log_error "Failed to delete Policy Remediation: $remediation_name"
+        return 1
+    fi
+}
+
+# --- Policy Definition Deletion ---
+delete_policy_definition() {
+    local def_id="$1"
+    local display_name="$2"
+    local def_name="$3"
+
+    log_special "Deleting Policy Definition: $display_name"
+
+    local result
+    local exit_code
+
+    if [[ "$def_id" =~ /managementGroups/([^/]+)/ ]]; then
+        local mg="${BASH_REMATCH[1]}"
+        result=$(az policy definition delete --name "$def_name" --management-group "$mg" 2>&1)
+        exit_code=$?
+    elif [[ "$def_id" =~ /subscriptions/([^/]+)/ ]]; then
+        local sub="${BASH_REMATCH[1]}"
+        result=$(az policy definition delete --name "$def_name" --subscription "$sub" 2>&1)
+        exit_code=$?
+    else
+        # Fallback
+        result=$(az policy definition delete --name "$def_name" 2>&1)
+        exit_code=$?
+    fi
+
+    if [[ $exit_code -eq 0 ]]; then
+        log_success "Successfully deleted Policy Definition: $display_name"
+        return 0
+    else
+        log_error "❌ Failed to delete Policy Definition: $display_name"
+        log_error "Error: $result"
         return 1
     fi
 }
@@ -3341,6 +3445,20 @@ main() {
         fi
     done
 
+    # --- Phase 3.5: Policy Definitions ---
+    for id in "${ALL_IDS[@]}"; do
+        local resource_type=$(get_resource_type "$id")
+        if [[ "$resource_type" == "PolicyDefinition" ]]; then
+            local details=$(get_resource_details "$id")
+            IFS="|" read -r name type scope extra <<< "$details"
+            if delete_policy_definition "$id" "$name" "$extra"; then
+                ((deleted_count++))
+            else
+                ((failed_count++))
+            fi
+        fi
+    done
+
     # --- Phase 4: Management Group Role Assignments ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
@@ -3428,6 +3546,7 @@ main() {
               "$resource_type" != "UnknownRoleAssignment" && \
               "$resource_type" != "PolicyAssignment" && \
               "$resource_type" != "PolicyRemediation" && \
+              "$resource_type" != "PolicyDefinition" && \
               "$resource_type" != "ManagementGroupDeployment" && \
               "$resource_type" != "DirectoryDiagnosticSetting" ]]; then
             local details=$(get_resource_details "$id")
