@@ -69,8 +69,9 @@ declare -A SERVICE_DISCOVERY_FUNCTIONS=(
 # --- Logging Functions ---
 LOG_FILE=""
 LOG_ENABLED=false
+TSV_FILE=""
 
-# --- Helper function to strip ANSI color codes and special characters --- 
+# --- Helper function to strip ANSI color codes and special characters ---
 strip_colors() {
     # Remove ANSI color codes (e.g., \033[0;34m)
     local cleaned=$(echo "$1" | sed -E 's/\x1B\[[0-9;]*[mGK]//g')
@@ -79,44 +80,44 @@ strip_colors() {
     echo "$cleaned"
 }
 
-# --- Function to log to file if logging is enabled --- 
+# --- Function to log to file if logging is enabled ---
 log_to_file() {
     local level="$1"
     local message="$2"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
+
     if [[ "$LOG_ENABLED" == true ]] && [[ -n "$LOG_FILE" ]]; then
         # Strip ANSI color codes and escape sequences before writing to log file
         local clean_message
         clean_message=$(strip_colors "$message")
-        
+
         # Try to write to log file, but don't fail if we can't
         echo "[$timestamp] $level: $clean_message" >> "$LOG_FILE" 2>/dev/null || true
     fi
 }
 
-# --- Logging functions with file logging --- 
-log_info() { 
+# --- Logging functions with file logging ---
+log_info() {
     echo -e "${BLUE}ℹ️  $*${NC}"
     log_to_file "INFO" "$*"
 }
-log_success() { 
+log_success() {
     echo -e "${GREEN}✅ $*${NC}"
     log_to_file "SUCCESS" "$*"
 }
-log_warning() { 
+log_warning() {
     echo -e "${YELLOW}⚠️  $*${NC}"
     log_to_file "WARNING" "$*"
 }
-log_error() { 
+log_error() {
     echo -e "${RED}❌ $*${NC}"
     log_to_file "ERROR" "$*"
 }
-log_debug() { 
+log_debug() {
     echo -e "${CYAN}ℹ️  $*${NC}"
     log_to_file "DEBUG" "$*"
 }
-log_special() { 
+log_special() {
     echo -e "${PURPLE}🔐 $*${NC}"
     log_to_file "SPECIAL" "$*"
 }
@@ -133,40 +134,41 @@ usage() {
     echo "  It operates across all scopes—Subscription, Management Group, and Tenant—and identifies resources using name patterns and tags."
     echo "  The script includes advanced exclusion options and audit logging capabilities to ensure precise and secure resource management, saving significant time and manual effort."
 
-    echo 
+    echo
     echo -e "${YELLOW}Usage:${NC}"
-    echo "  bash $0 <resource-name> [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--exclude-service SERVICE_TYPES] [--log-file FILE] [--append-log] [--help]"
-    echo "  bash $0 <pattern1,pattern2,...> [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--exclude-service SERVICE_TYPES] [--log-file FILE] [--append-log]"
-    echo "  bash $0 --tag KEY[=VALUE] [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--exclude-service SERVICE_TYPES] [--log-file FILE] [--append-log] [--help]"
-    echo "  bash $0 --resource-group RG_NAME [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--exclude-service SERVICE_TYPES] [--log-file FILE] [--append-log] [--help]"
+    echo "  bash $0 <resource-name> [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--exclude-service SERVICE_TYPES] [--log-file FILE] [--tsv-file FILE] [--append-log] [--help]"
+    echo "  bash $0 <pattern1,pattern2,...> [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--exclude-service SERVICE_TYPES] [--log-file FILE] [--tsv-file FILE] [--append-log]"
+    echo "  bash $0 --tag KEY[=VALUE] [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--exclude-service SERVICE_TYPES] [--log-file FILE] [--tsv-file FILE] [--append-log] [--help]"
+    echo "  bash $0 --resource-group RG_NAME [--dry-run] [--delete] [--subscription SUB_ID] [--exclude RESOURCE_NAMES] [--exclude-service SERVICE_TYPES] [--log-file FILE] [--tsv-file FILE] [--append-log] [--help]"
     echo
     echo -e "${YELLOW}Options:${NC}"
-    echo "  <resource-name>         Search pattern (case-insensitive). Use commas for multiple patterns."
-    echo "                          Example: \"cortex,ADSConnector,ADSGallery,ADSOutpost,monitor\" (matches ANY of these patterns)"
-    echo "  --dry-run               Only show what would be deleted (default)"
-    echo "  --delete                Actually delete resources (default: dry-run)"
-    echo "  --tag KEY[=VALUE]       Search by tag in three ways:"
-    echo "                              • KEY          - matches tag key"
-    echo "                              • KEY=VALUE    - matches exact key-value pair"
-    echo "                              • VALUE        - matches tag value"
-    echo "  --resource-group        Target specific resource group for discovery/deletion"
-    echo "                          Accepts comma-separated list of resource group names"
-    echo "  --subscription          Limit search to specific subscription"
+    echo "  <resource-name>          Search pattern (case-insensitive). Use commas for multiple patterns."
+    echo "                           Example: \"cortex,ADSConnector,ADSGallery,ADSOutpost,monitor\" (matches ANY of these patterns)"
+    echo "  --dry-run                Only show what would be deleted (default)"
+    echo "  --delete                 Actually delete resources (default: dry-run)"
+    echo "  --tag KEY[=VALUE]        Search by tag in three ways:"
+    echo "                               • KEY          - matches tag key"
+    echo "                               • KEY=VALUE    - matches exact key-value pair"
+    echo "                               • VALUE        - matches tag value"
+    echo "  --resource-group         Target specific resource group for discovery/deletion"
+    echo "                           Accepts comma-separated list of resource group names"
+    echo "  --subscription           Limit search to specific subscription"
     echo "  --exclude-subscription  Exclude specific subscription(s) from search"
-    echo "                          Accepts comma-separated subscription IDs"
-    echo "  --exclude               Comma-separated resource names to exclude from deletion"
-    echo "                          (exact match, case-sensitive, not patterns)"
-    echo "  --exclude-service       Comma-separated service types to skip scanning entirely"
-    echo "                          Available types: resources, resourcegroups, policies, roles,"
-    echo "                          diagnostics, serviceprincipals, managementgroups, subscriptions"
-    echo "  --log-file FILE         Write detailed audit log to specified file"
-    echo "  --append-log            Append to existing log file instead of overwriting"
-    echo "  --help                  Show this help message"
+    echo "                           Accepts comma-separated subscription IDs"
+    echo "  --exclude                Comma-separated resource names to exclude from deletion"
+    echo "                           (exact match, case-sensitive, not patterns)"
+    echo "  --exclude-service        Comma-separated service types to skip scanning entirely"
+    echo "                           Available types: resources, resourcegroups, policies, roles,"
+    echo "                           diagnostics, serviceprincipals, managementgroups, subscriptions"
+    echo "  --log-file FILE          Write detailed audit log to specified file"
+    echo "  --tsv-file FILE          Export discovered resources to a specified TSV file for review"
+    echo "  --append-log             Append to existing log file instead of overwriting"
+    echo "  --help                   Show this help message"
     echo
     echo -e "${YELLOW}Examples:${NC}"
     echo
-    echo "  ${PURPLE}# Combined pattern and resource group targeting${NC}"
-    echo "  bash $0 \"cortex,ADSConnector,ADSGallery,ADSOutpost\"  --dry-run --resource-group \"cortex-onboarding-*,cortex-m*\" --exclude-service \"serviceprincipals\" --exclude \"cortex-scan-platform,production\" --log-file \"audit.log\""
+    echo "  ${PURPLE}# Combined pattern and resource group targeting with TSV export${NC}"
+    echo "  bash $0 \"cortex,ADSConnector\"  --dry-run --resource-group \"cortex-*\" --tsv-file \"review.tsv\""
     echo
     echo "  ${PURPLE}# Help message${NC}"
     echo "  bash $0 --help"
@@ -264,6 +266,14 @@ while [[ $# -gt 0 ]]; do
             LOG_ENABLED=true
             shift 2
             ;;
+        --tsv-file)
+            if [[ $# -lt 2 ]] || [[ "$2" == --* ]]; then
+                log_error "--tsv-file requires a value"
+                usage
+            fi
+            TSV_FILE="$2"
+            shift 2
+            ;;
         --append-log)
             APPEND_LOG=true
             shift
@@ -282,7 +292,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --- Validation --- 
+# --- Validation ---
 if [[ -z "$NAME_PATTERN" && -z "$TAG_FILTER" && -z "$RESOURCE_GROUPS" ]]; then
     log_error "Either name pattern, tag filter, or resource group specification is required"
     usage
@@ -292,7 +302,7 @@ fi
 declare -a NAME_PATTERNS=()
 if [[ -n "$NAME_PATTERN" ]]; then
     IFS=',' read -ra NAME_PATTERNS <<< "$NAME_PATTERN"
-    #  --- Trim whitespace from each pattern --- 
+    #  --- Trim whitespace from each pattern ---
     for i in "${!NAME_PATTERNS[@]}"; do
         NAME_PATTERNS[$i]=$(echo "${NAME_PATTERNS[$i]}" | xargs)
     done
@@ -320,7 +330,7 @@ if [[ -n "$EXCLUDE_SUBSCRIPTIONS" ]]; then
         EXCLUDE_SUBSCRIPTION_ARRAY[$i]=$(echo "${EXCLUDE_SUBSCRIPTION_ARRAY[$i]}" | xargs)
     done
     log_to_file "INFO" "Parsed ${#EXCLUDE_SUBSCRIPTION_ARRAY[@]} exclude subscription(s): ${EXCLUDE_SUBSCRIPTION_ARRAY[*]}"
-    
+
     # Validate exclude subscriptions don't conflict with include subscription
     if [[ -n "$SUBSCRIPTION_ID" ]]; then
         for exclude_sub in "${EXCLUDE_SUBSCRIPTION_ARRAY[@]}"; do
@@ -340,13 +350,13 @@ if [[ -n "$EXCLUDE_SERVICES" ]]; then
     # Trim whitespace and convert to lowercase
     for i in "${!EXCLUDE_SERVICE_ARRAY[@]}"; do
         EXCLUDE_SERVICE_ARRAY[$i]=$(echo "${EXCLUDE_SERVICE_ARRAY[$i]}" | tr '[:upper:]' '[:lower:]' | xargs)
-        
+
         # Skip empty strings
         if [[ -z "${EXCLUDE_SERVICE_ARRAY[$i]}" ]]; then
             log_warning "Found empty service type in --exclude-service, skipping"
             continue
         fi
-        
+
         # Validate service type - REMOVE 'local' keyword here
         service_type="${EXCLUDE_SERVICE_ARRAY[$i]}"
         if [[ -z "${SERVICE_TYPE_MAP[$service_type]}" ]]; then
@@ -354,14 +364,14 @@ if [[ -n "$EXCLUDE_SERVICES" ]]; then
             log_error "Available types: ${!SERVICE_TYPE_MAP[@]}"
             exit 1
         fi
-        
+
         # Map to resource types
         if [[ "$service_type" == "all" ]]; then
             # Exclude all service-specific types
-            EXCLUDED_RESOURCE_TYPES=("ResourceGroup" "PolicyAssignment" "PolicyRemediation" 
+            EXCLUDED_RESOURCE_TYPES=("ResourceGroup" "PolicyAssignment" "PolicyRemediation"
                                      "CustomRole" "RoleAssignment" "UnknownRoleAssignment"
                                      "DiagnosticSetting" "SubscriptionDiagnosticSetting" "DirectoryDiagnosticSetting"
-                                     "EnterpriseApplication" "ManagementGroupRoleAssignment" 
+                                     "EnterpriseApplication" "ManagementGroupRoleAssignment"
                                      "ManagementGroupDeployment" "SubscriptionRoleAssignment")
             log_info "Excluding ALL service-specific discovery"
         else
@@ -374,12 +384,12 @@ if [[ -n "$EXCLUDE_SERVICES" ]]; then
             done
         fi
     done
-    
+
     log_to_file "INFO" "Parsed ${#EXCLUDE_SERVICE_ARRAY[@]} exclude service(s): ${EXCLUDE_SERVICE_ARRAY[*]}"
     log_to_file "INFO" "Excluding resource types: ${EXCLUDED_RESOURCE_TYPES[*]}"
 fi
 
-#  --- Sanitize name pattern for JSON queries --- 
+#  --- Sanitize name pattern for JSON queries ---
 SANITIZED_PATTERN=""
 if [[ ${#NAME_PATTERNS[@]} -gt 0 ]]; then
     SANITIZED_PATTERN=$(printf '%s' "${NAME_PATTERNS[0]}" | sed "s/'/''/g")
@@ -412,6 +422,13 @@ if ! az account show >/dev/null 2>&1; then
 fi
 
 log_success "Azure login confirmed"
+
+# --- TSV File Initialization ---
+if [[ -n "$TSV_FILE" ]]; then
+    # Create or overwrite the file with TSV headers
+    echo -e "Resource Name\tResource Type\tScope\tDetails" > "$TSV_FILE"
+    log_info "TSV Export enabled. Discovered resources will be saved to: $TSV_FILE"
+fi
 
 # --- Performance Configuration ---
 MAX_PARALLEL=${MAX_PARALLEL:-20}  # Max parallel background jobs for diagnostic settings
@@ -453,7 +470,7 @@ declare -a RG_SUBSCRIPTION=()
 declare -a RESOURCE_DETAILS=()
 declare -a RG_EXCLUDED_RESOURCES=()  # Track excluded resources in resource groups
 
-#  --- Track if we found any resources --- 
+#  --- Track if we found any resources ---
 RESOURCES_FOUND=false
 
 # --- Helper Functions ---
@@ -461,7 +478,7 @@ normalize() {
   echo "$1" | tr '[:upper:]' '[:lower:]'
 }
 
-#  --- Clean display name for output (handles edge cases where role names contain literal color codes) --- 
+#  --- Clean display name for output (handles edge cases where role names contain literal color codes) ---
 clean_display_name() {
     local text="$1"
     echo "$text"
@@ -470,43 +487,43 @@ clean_display_name() {
 # --- Check if service type should be excluded ---
 is_service_excluded() {
     local service_type="$1"
-    
+
     # Check if 'all' is excluded
     if [[ " ${EXCLUDE_SERVICE_ARRAY[@]} " =~ " all " ]]; then
         return 0
     fi
-    
+
     # Check if specific service is excluded
     if [[ " ${EXCLUDE_SERVICE_ARRAY[@]} " =~ " ${service_type} " ]]; then
         return 0
     fi
-    
+
     return 1
 }
 
 # --- Check if resource type should be excluded from discovery ---
 is_resource_type_excluded() {
     local resource_type="$1"
-    
+
     # If no exclusions, include everything
     [[ ${#EXCLUDED_RESOURCE_TYPES[@]} -eq 0 ]] && return 1
-    
+
     # Check if this resource type is in excluded list
     for excluded_type in "${EXCLUDED_RESOURCE_TYPES[@]}"; do
         if [[ "$resource_type" == "$excluded_type" ]]; then
             return 0
         fi
     done
-    
+
     return 1
 }
 
-#  --- Simple highlight function that only highlights if no suspicious sequences are found --- 
+#  --- Simple highlight function that only highlights if no suspicious sequences are found ---
 safe_highlight() {
     local text="$1"
     local pattern="$2"
-    
-    #  --- If the text contains what looks like color codes or escape sequences, don't attempt highlighting --- 
+
+    #  --- If the text contains what looks like color codes or escape sequences, don't attempt highlighting ---
     if [[ "$text" =~ [\x00-\x1F] ]] || [[ "$text" =~ 033\[ ]]; then
         echo "$text"
     else
@@ -519,49 +536,49 @@ safe_highlight() {
     fi
 }
 
-#  --- Multi-pattern highlighting --- 
+#  --- Multi-pattern highlighting ---
 highlight_matches() {
     local text="$1"
     local result="$text"
-    
-    #  --- If the text contains what looks like color codes, don't attempt highlighting --- 
+
+    #  --- If the text contains what looks like color codes, don't attempt highlighting ---
     if [[ "$text" =~ [\x00-\x1F] ]] || [[ "$text" =~ 033\[ ]]; then
         echo "$text"
         return
     fi
-    
-    #  --- Highlight all matching patterns --- 
+
+    #  --- Highlight all matching patterns ---
     for pattern in "${NAME_PATTERNS[@]}"; do
         if [[ "$(normalize "$result")" == *"$(normalize "$pattern")"* ]]; then
             local esc_pattern=$(echo "$pattern" | sed 's/[]\/$*.^|[]/\\&/g')
             result=$(echo "$result" | sed -E "s/($esc_pattern)/${YELLOW}\1${NC}/Ig")
         fi
     done
-    
+
     echo "$result"
 }
 
-# --- Multi-pattern matching helper --- 
+# --- Multi-pattern matching helper ---
 matches_any_pattern() {
     local text="$1"
     local text_lower="$(normalize "$text")"
-    
-    #  --- If in pure tag mode or resource group mode (no name patterns), skip pattern matching --- 
+
+    #  --- If in pure tag mode or resource group mode (no name patterns), skip pattern matching ---
     if [[ (-n "$TAG_FILTER" && ${#NAME_PATTERNS[@]} -eq 0) || (-n "$RESOURCE_GROUPS" && ${#NAME_PATTERNS[@]} -eq 0) ]]; then
         return 1
     fi
-    
-    #  --- If no patterns, return false --- 
+
+    #  --- If no patterns, return false ---
     [[ ${#NAME_PATTERNS[@]} -eq 0 ]] && return 1
-    
-    #  --- Check if text matches any of the patterns --- 
+
+    #  --- Check if text matches any of the patterns ---
     for pattern in "${NAME_PATTERNS[@]}"; do
         if [[ "$text_lower" == *"$(normalize "$pattern")"* ]]; then
             echo "$pattern"  # Return the matching pattern for logging
             return 0
         fi
     done
-    
+
     return 1
 }
 
@@ -569,14 +586,14 @@ matches_any_pattern() {
 matches_resource_group() {
     local resource_group="$1"
     local rg_lower="$(normalize "$resource_group")"
-    
-    #  --- If no resource group filter specified, return false (don't match everything) --- 
+
+    #  --- If no resource group filter specified, return false (don't match everything) ---
     [[ ${#RESOURCE_GROUP_ARRAY[@]} -eq 0 ]] && return 1
-    
-    #  --- Check if resource group matches any of the specified patterns --- 
+
+    #  --- Check if resource group matches any of the specified patterns ---
     for rg_pattern in "${RESOURCE_GROUP_ARRAY[@]}"; do
         local pattern_lower="$(normalize "$rg_pattern")"
-        
+
         # Support wildcard matching for resource groups
         if [[ "$rg_pattern" == *"*"* ]]; then
             # Convert wildcard pattern to regex
@@ -593,7 +610,7 @@ matches_resource_group() {
             fi
         fi
     done
-    
+
     return 1
 }
 
@@ -602,29 +619,29 @@ should_exclude() {
     local resource_name="$1"
     local resource_type="$2"
     local resource_id="$3"
-    
-    #  --- If no exclude patterns, don't exclude anything --- 
+
+    #  --- If no exclude patterns, don't exclude anything ---
     [[ -z "$EXCLUDE_PATTERNS" ]] && return 1
-    
-    #  --- Check each exclude pattern --- 
+
+    #  --- Check each exclude pattern ---
     for exclude_name in "${EXCLUDE_ARRAY[@]}"; do
-        #  --- Trim whitespace --- 
+        #  --- Trim whitespace ---
         exclude_name=$(echo "$exclude_name" | xargs)
-        
-        #  --- Skip empty patterns --- 
+
+        #  --- Skip empty patterns ---
         [[ -z "$exclude_name" ]] && continue
-        
-        # --- EXACT MATCH (case-sensitive) --- 
+
+        # --- EXACT MATCH (case-sensitive) ---
         if [[ "$resource_name" == "$exclude_name" ]]; then
             log_warning "Excluding resource: $resource_name ($resource_type) - exact match with exclude name: $exclude_name"
-            
+
             # Check if this resource is inside a resource group
             if [[ "$resource_id" == */resourceGroups/* ]]; then
                 # Extract resource group name from resource ID
                 local rg_name
                 if [[ "$resource_id" =~ /resourceGroups/([^/]+)/ ]]; then
                     rg_name="${BASH_REMATCH[1]}"
-                    
+
                     # Check if already tracked
                     local already_tracked=false
                     for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
@@ -633,29 +650,29 @@ should_exclude() {
                             break
                         fi
                     done
-                    
+
                     if [[ "$already_tracked" == false ]]; then
                         RG_EXCLUDED_RESOURCES+=("$rg_name|$resource_name|$resource_type")
                         log_warning "  ↳ Resource is in Resource Group: $rg_name"
                     fi
                 fi
             fi
-            
+
             return 0  # Should exclude
         fi
-        
-        #  --- Also check resource ID for exact matches --- 
+
+        #  --- Also check resource ID for exact matches ---
         local resource_basename=$(basename "$resource_id" 2>/dev/null || echo "")
         if [[ "$resource_basename" == "$exclude_name" ]]; then
             log_warning "Excluding resource: $resource_name ($resource_type) - exact match with exclude name in ID: $exclude_name"
-            
+
             # Check if this resource is inside a resource group
             if [[ "$resource_id" == */resourceGroups/* ]]; then
                 # Extract resource group name from resource ID
                 local rg_name
                 if [[ "$resource_id" =~ /resourceGroups/([^/]+)/ ]]; then
                     rg_name="${BASH_REMATCH[1]}"
-                    
+
                     # Check if already tracked
                     local already_tracked=false
                     for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
@@ -664,22 +681,22 @@ should_exclude() {
                             break
                         fi
                     done
-                    
+
                     if [[ "$already_tracked" == false ]]; then
                         RG_EXCLUDED_RESOURCES+=("$rg_name|$resource_name|$resource_type")
                         log_warning "  ↳ Resource is in Resource Group: $rg_name"
                     fi
                 fi
             fi
-            
+
             return 0  # Should exclude
         fi
     done
-    
+
     return 1  # Should not exclude
 }
 
-#  --- Helper functions for older Bash versions --- 
+#  --- Helper functions for older Bash versions ---
 get_resource_type() {
     local id="$1"
     for item in "${RESOURCE_TYPES[@]}"; do
@@ -726,13 +743,13 @@ get_subscriptions() {
             log_error "No enabled subscriptions found or unable to list subscriptions"
             exit 1
         fi
-        
+
         # Apply exclude subscriptions filter if specified
         if [[ ${#EXCLUDE_SUBSCRIPTION_ARRAY[@]} -gt 0 ]]; then
             local filtered_subs=""
             while IFS= read -r sub; do
                 [[ -z "$sub" ]] && continue
-                
+
                 local should_exclude=false
                 for exclude_sub in "${EXCLUDE_SUBSCRIPTION_ARRAY[@]}"; do
                     if [[ "$sub" == "$exclude_sub" ]]; then
@@ -741,22 +758,22 @@ get_subscriptions() {
                         break
                     fi
                 done
-                
+
                 if [[ "$should_exclude" == false ]]; then
                     filtered_subs+="$sub"$'\n'
                 fi
             done <<< "$subs"
-            
+
             subs="$filtered_subs"
-            
+
             if [[ -z "$subs" ]]; then
                 log_error "All subscriptions were excluded. Nothing to search."
                 exit 1
             fi
-            
+
             log_info "Excluded ${#EXCLUDE_SUBSCRIPTION_ARRAY[@]} subscription(s) from search"
         fi
-        
+
         echo "$subs"
     fi
 }
@@ -765,29 +782,29 @@ get_subscriptions() {
 discover_resource_groups() {
     local sub="$1"
     local sub_name="$2"
-    
+
     # Skip if resource groups are excluded
     if is_service_excluded "resourcegroups"; then
         log_debug "Skipping resource group discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_debug "Searching for resource groups in subscription: $sub_name"
-    
+
     local rgs
     rgs=$(az group list --subscription "$sub" -o json 2>/dev/null || echo '[]')
-    
+
     while IFS= read -r row; do
         [[ -z "$row" ]] && continue
-        
+
         local name id tags location
         name=$(jq -r '.name // ""' <<< "$row")
         id=$(jq -r '.id // ""' <<< "$row")
         tags=$(jq -r '.tags // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' <<< "$row")
         location=$(jq -r '.location // ""' <<< "$row")
-        
+
         local should_include=false
-        
+
         # Different logic based on search mode
         if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]]; then
             # Resource group mode: include if RG matches specified patterns
@@ -803,17 +820,17 @@ discover_resource_groups() {
             # No filters (shouldn't happen due to validation)
             continue
         fi
-        
+
         if [[ "$should_include" == false ]]; then
             continue
         fi
-        
+
         # Check for duplicates BEFORE adding
         if [[ " ${ALL_IDS[@]} " =~ " ${id} " ]]; then
             log_debug "Skipping duplicate resource group: $name (already discovered)"
             continue
         fi
-        
+
         echo "  → Found Resource Group: $(highlight_matches "$name") (Location: $location)"
         log_to_file "FOUND" "Resource Group: $name in subscription: $sub_name, Location: $location"
         SUMMARY_ROWS+=("$name|ResourceGroup|$sub_name|Location: $location, Tags: $tags")
@@ -972,35 +989,35 @@ discover_resources_via_graph() {
 discover_resources() {
     local sub="$1"
     local sub_name="$2"
-    
+
     # Skip regular resources if excluded
     if is_service_excluded "resources"; then
         log_debug "Skipping regular resource discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching resources in subscription: $sub_name"
-    
-    # --- Resources in resource groups --- 
+
+    # --- Resources in resource groups ---
     local resources
     resources=$(az resource list --subscription "$sub" -o json 2>/dev/null || echo '[]')
-    
+
     while IFS= read -r row; do
         [[ -z "$row" ]] && continue
-        
+
         local name type id tags resource_group
         name=$(jq -r '.name // ""' <<< "$row")
         type=$(jq -r '.type // ""' <<< "$row")
         id=$(jq -r '.id // ""' <<< "$row")
         tags=$(jq -r '.tags // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' <<< "$row")
-        
+
         # Extract resource group from resource ID
         if [[ "$id" =~ /resourceGroups/([^/]+)/ ]]; then
             resource_group="${BASH_REMATCH[1]}"
         else
             resource_group=""
         fi
-        
+
         # --- Check if resource actually belongs to this subscription ---
         local resource_sub
         if [[ "$id" =~ /subscriptions/([^/]+)/ ]]; then
@@ -1010,17 +1027,17 @@ discover_resources() {
                 continue
             fi
         fi
-        
-        # --- Skip if resource group filtering is enabled and doesn't match --- 
+
+        # --- Skip if resource group filtering is enabled and doesn't match ---
         if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]] && [[ -n "$resource_group" ]]; then
             if ! matches_resource_group "$resource_group"; then
                 continue
             fi
         fi
-        
-        # --- Skip role definitions (handled separately) --- 
+
+        # --- Skip role definitions (handled separately) ---
         [[ "$type" == *"Microsoft.Authorization/roleDefinitions"* ]] && continue
-        
+
         # --- Multi-pattern matching ---
         local matched_pattern
         if matched_pattern=$(matches_any_pattern "$name"); then
@@ -1038,22 +1055,22 @@ discover_resources() {
             fi
         fi
     done < <(jq -c '.[]' <<< "$resources")
-    
-    # --- Resource Groups --- 
+
+    # --- Resource Groups ---
     discover_resource_groups "$sub" "$sub_name"
 }
 
 # --- Resource Discovery Functions by TAGS ---
 discover_resources_by_tag() {
     local tag_filter="$1"
-    
+
     # Skip regular resources if excluded
     if is_service_excluded "resources"; then
         log_debug "Skipping tag-based resource discovery (excluded via --exclude-service)"
         return
     fi
-    
-    # --- Parse tag filter (key=value or just key or just value) --- 
+
+    # --- Parse tag filter (key=value or just key or just value) ---
     local tag_key tag_value
     if [[ "$tag_filter" == *"="* ]]; then
         tag_key="${tag_filter%=*}"
@@ -1063,73 +1080,73 @@ discover_resources_by_tag() {
         tag_key="$tag_filter"
         log_info "Searching for resources with tag key or value: $tag_key"
     fi
-    
+
     local subscriptions
     subscriptions=$(get_subscriptions)
-    
+
     while IFS= read -r sub; do
         [[ -z "$sub" ]] && continue
-        
+
         local sub_name
         sub_name=$(get_sub_name "$sub")
-        
+
         log_info "Searching tagged resources in subscription: $sub_name"
-        
-        # --- Find resources with the specified tag --- 
+
+        # --- Find resources with the specified tag ---
         local resources
         if [[ "$tag_filter" == *"="* ]]; then
             resources=$(az resource list --subscription "$sub" --query "[?tags.$tag_key=='$tag_value']" -o json 2>/dev/null || echo '[]')
         else
             resources=$(az resource list --subscription "$sub" --query "[?contains(keys(tags), '$tag_key') || contains(values(tags), '$tag_key')]" -o json 2>/dev/null || echo '[]')
         fi
-        
+
         # Debug: Check resource count
         local resource_count=$(echo "$resources" | jq -r 'length // 0' 2>/dev/null || echo 0)
         log_debug "Found $resource_count resources with tag filter '$tag_filter' in subscription $sub_name"
-        
+
         while IFS= read -r resource; do
             [[ -z "$resource" ]] || [[ "$resource" == "null" ]] && continue
-            
+
             local name type id tags location resource_group
             name=$(jq -r '.name // ""' <<< "$resource")
             type=$(jq -r '.type // ""' <<< "$resource")
             id=$(jq -r '.id // ""' <<< "$resource")
             tags=$(jq -r '.tags // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' <<< "$resource")
             location=$(jq -r '.location // ""' <<< "$resource")
-            
+
             # Extract resource group from resource ID
             if [[ "$id" =~ /resourceGroups/([^/]+)/ ]]; then
                 resource_group="${BASH_REMATCH[1]}"
             else
                 resource_group=""
             fi
-            
-            # --- Skip if resource group filtering is enabled and doesn't match --- 
+
+            # --- Skip if resource group filtering is enabled and doesn't match ---
             if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]] && [[ -n "$resource_group" ]]; then
                 if ! matches_resource_group "$resource_group"; then
                     continue
                 fi
             fi
-            
+
             echo "  → Found Tagged Resource: $name ($type)"
             echo "    ↳ Location: $location, Tags: $tags"
             log_to_file "FOUND" "Tagged Resource: $name ($type) in $sub_name"
             log_to_file "DETAILS" "  Location: $location, Tags: $tags"
-            
+
             SUMMARY_ROWS+=("$name|$type|$sub_name|Tags: $tags")
             ALL_IDS+=("$id")
-            
+
             RESOURCE_TYPES+=("$id|$type")
             RESOURCE_DETAILS+=("$id|$name|$type|$sub_name|$tags")
-            
+
             RESOURCES_FOUND=true
-            
+
         done < <(jq -c '.[]' <<< "$resources" 2>/dev/null || echo "")
-        
+
         discover_resource_groups_by_tag "$sub" "$sub_name" "$tag_filter"
-        
+
     done <<< "$subscriptions"
-    
+
     if [[ "$RESOURCES_FOUND" == false ]] && [[ -n "$tag_filter" ]]; then
         log_debug "No resources found with tag filter: $tag_filter"
     fi
@@ -1138,21 +1155,21 @@ discover_resources_by_tag() {
 # --- Resource Group Discovery Functions by TAGS ---
 discover_resource_groups_by_tag() {
     local sub="$1" sub_name="$2" tag_filter="$3"
-    
+
     # Skip if resource groups are excluded
     if is_service_excluded "resourcegroups"; then
         log_debug "Skipping tagged resource group discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     # Skip if no subscription or empty subscription
     if [[ -z "$sub" ]] || [[ -z "$sub_name" ]] || [[ "$sub_name" == "Unknown" ]]; then
         log_debug "Skipping resource group discovery for empty/invalid subscription"
         return
     fi
-    
+
     log_debug "Searching for tagged resource groups in subscription: $sub_name"
-    
+
     local rgs
     if [[ "$tag_filter" == *"="* ]]; then
         local tag_key="${tag_filter%=*}"
@@ -1161,48 +1178,48 @@ discover_resource_groups_by_tag() {
     else
         rgs=$(az group list --subscription "$sub" --query "[?contains(keys(tags), '$tag_filter') || contains(values(tags), '$tag_filter')]" -o json 2>/dev/null || echo '[]')
     fi
-    
+
     # # Debug: Check RG count
     # local rg_count=$(echo "$rgs" | jq -r 'length // 0' 2>/dev/null || echo 0)
     # log_debug "Found $rg_count resource groups with tag filter '$tag_filter' in subscription $sub_name"
-    
+
     while IFS= read -r rg; do
         [[ -z "$rg" ]] || [[ "$rg" == "null" ]] && continue
-        
+
         local name id tags location
         name=$(jq -r '.name // ""' <<< "$rg")
         id=$(jq -r '.id // ""' <<< "$rg")
         tags=$(jq -r '.tags // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' <<< "$rg")
         location=$(jq -r '.location // ""' <<< "$rg")
-        
-        # --- Check if resource group matches the filter --- 
+
+        # --- Check if resource group matches the filter ---
         local matched_rg_pattern
         if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]] && ! matches_resource_group "$name"; then
             continue
         fi
-        
+
         # Check if we already have this resource group in our list
         if [[ " ${ALL_IDS[@]} " =~ " ${id} " ]]; then
             log_debug "Skipping duplicate resource group: $name (already discovered)"
             continue
         fi
-        
+
         echo "  → Found Tagged Resource Group: $name"
         echo "    ↳ Location: $location, Tags: $tags"
         log_to_file "FOUND" "Tagged Resource Group: $name in $sub_name"
         log_to_file "DETAILS" "  Location: $location, Tags: $tags"
-        
+
         SUMMARY_ROWS+=("$name|ResourceGroup|$sub_name|Tags: $tags")
         ALL_IDS+=("$id")
-        
+
         RESOURCE_TYPES+=("$id|ResourceGroup")
         RG_SUBSCRIPTION+=("$id|$sub")
         RESOURCE_DETAILS+=("$id|$name|ResourceGroup|$sub_name|$tags")
-        
+
         RESOURCES_FOUND=true
-        
+
         discover_all_resources_in_rg "$sub" "$sub_name" "$name" "$id"
-        
+
     done < <(jq -c '.[]' <<< "$rgs" 2>/dev/null || echo "")
 }
 
@@ -1213,41 +1230,41 @@ discover_resources_in_specific_rgs() {
         log_debug "Skipping specific resource group discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching resources in specific resource groups: ${RESOURCE_GROUP_ARRAY[*]}"
-    
+
     local subscriptions
     subscriptions=$(get_subscriptions)
-    
+
     while IFS= read -r sub; do
         [[ -z "$sub" ]] && continue
-        
+
         local sub_name
         sub_name=$(get_sub_name "$sub")
-        
+
         log_info "Checking subscription: $sub_name"
-        
+
         # Get all resource groups in subscription
         local all_rgs
         all_rgs=$(az group list --subscription "$sub" --query '[].name' -o tsv 2>/dev/null || echo "")
-        
+
         for rg_name in $all_rgs; do
             [[ -z "$rg_name" ]] && continue
-            
+
             # Check if this RG matches our filter
             if ! matches_resource_group "$rg_name"; then
                 continue
             fi
-            
+
             # Check if RG exists
             if ! az group show --name "$rg_name" --subscription "$sub" &>/dev/null; then
                 log_warning "Resource group not found or no access: $rg_name in subscription $sub"
                 continue
             fi
-            
+
             echo "  → Found Resource Group: $rg_name"
             log_to_file "FOUND" "Resource Group: $rg_name in subscription: $sub_name"
-            
+
             # Add resource group to deletion list
             local rg_id="/subscriptions/$sub/resourceGroups/$rg_name"
             SUMMARY_ROWS+=("$rg_name|ResourceGroup|$sub_name|Targeted RG")
@@ -1256,7 +1273,7 @@ discover_resources_in_specific_rgs() {
             RG_SUBSCRIPTION+=("$rg_id|$sub")
             RESOURCE_DETAILS+=("$rg_id|$rg_name|ResourceGroup|$sub_name")
             RESOURCES_FOUND=true
-            
+
             # Discover all resources in this RG
             discover_all_resources_in_rg "$sub" "$sub_name" "$rg_name" "$rg_id"
         done
@@ -1265,29 +1282,29 @@ discover_resources_in_specific_rgs() {
 
 discover_all_resources_in_rg() {
     local sub="$1" sub_name="$2" rg_name="$3" rg_id="$4"
-    
+
     # Skip regular resources if excluded
     if is_service_excluded "resources"; then
         log_debug "Skipping resource discovery in RG $rg_name (excluded via --exclude-service)"
         return
     fi
-    
+
     log_debug "Discovering ALL resources in resource group: $rg_name"
-    
+
     local resources
     resources=$(az resource list --subscription "$sub" --resource-group "$rg_name" -o json 2>/dev/null || echo '[]')
-    
+
     while IFS= read -r resource; do
         [[ -z "$resource" ]] && continue
-        
+
         local name type id tags
         name=$(jq -r '.name // ""' <<< "$resource")
         type=$(jq -r '.type // ""' <<< "$resource")
         id=$(jq -r '.id // ""' <<< "$resource")
         tags=$(jq -r '.tags // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' <<< "$resource")
-        
+
         if [[ ! " ${ALL_IDS[@]} " =~ " ${id} " ]]; then
-            # --- In resource group mode, include ALL resources in the RG --- 
+            # --- In resource group mode, include ALL resources in the RG ---
             if [[ ${#NAME_PATTERNS[@]} -gt 0 ]]; then
                 # If name patterns specified, check for matches
                 local matched_pattern
@@ -1295,17 +1312,17 @@ discover_all_resources_in_rg() {
                     continue
                 fi
             fi
-            
+
             echo "    ↳ Found Resource in RG: $name ($type)"
             log_to_file "FOUND" "Resource in RG: $name ($type) in RG: $rg_name"
-            
+
             SUMMARY_ROWS+=("$name|$type|$sub_name|In RG: $rg_name")
             ALL_IDS+=("$id")
-            
+
             RESOURCE_TYPES+=("$id|$type")
             RESOURCE_DETAILS+=("$id|$name|$type|$sub_name|$rg_id")
         fi
-        
+
     done < <(jq -c '.[]' <<< "$resources")
 }
 
@@ -1315,32 +1332,32 @@ discover_management_group_role_assignments() {
         log_debug "Skipping management group role assignments discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching for management group role assignments..."
-    
+
     local mgs
     mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null || echo "")
-    
+
     if [[ -z "$mgs" ]]; then
         log_debug "No management groups found or access denied"
         return
     fi
-    
+
     for mg in $mgs; do
         log_debug "Checking management group: $mg"
         local assignments
         assignments=$(az role assignment list --scope "/providers/Microsoft.Management/managementGroups/$mg" -o json 2>/dev/null || echo '[]')
-        
+
         while IFS= read -r assignment; do
             [[ -z "$assignment" ]] && continue
-            
+
             local principal_name principal_id assignment_id principal_type scope
             principal_name=$(jq -r '.principalName // ""' <<< "$assignment")
             principal_id=$(jq -r '.principalId // ""' <<< "$assignment")
             assignment_id=$(jq -r '.id // ""' <<< "$assignment")
             principal_type=$(jq -r '.principalType // ""' <<< "$assignment")
             scope=$(jq -r '.scope // ""' <<< "$assignment")
-            
+
             # --- Multi-pattern matching ---
             local matched_pattern
             if matched_pattern=$(matches_any_pattern "$principal_name"); then
@@ -1362,52 +1379,52 @@ discover_diagnostic_settings() {
         log_debug "Skipping diagnostic settings discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching for diagnostic settings (parallel mode, max ${MAX_PARALLEL} concurrent)..."
-    
+
     local subscriptions
     subscriptions=$(get_subscriptions)
-    
+
     # --- Phase 1: Resource-level diagnostic settings (PARALLELIZED) ---
     local diag_tmp
     diag_tmp=$(mktemp -d)
-    
+
     while IFS= read -r sub; do
         [[ -z "$sub" ]] && continue
-        
+
         local sub_name
         sub_name=$(get_sub_name "$sub")
-        
+
         log_debug "Checking diagnostic settings in subscription: $sub_name"
-        
+
         local resources
         resources=$(az resource list --subscription "$sub" --query '[].id' -o tsv 2>/dev/null || echo "")
-        
+
         [[ -z "$resources" ]] && continue
-        
+
         # Pre-filter resources by resource group (in parent shell, before spawning jobs)
         local filtered_resources=()
         while IFS= read -r resource_id; do
             [[ -z "$resource_id" ]] && continue
-            
+
             local resource_group=""
             if [[ "$resource_id" =~ /resourceGroups/([^/]+)/ ]]; then
                 resource_group="${BASH_REMATCH[1]}"
             fi
-            
+
             if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]] && [[ -n "$resource_group" ]]; then
                 if ! matches_resource_group "$resource_group" >/dev/null; then
                     continue
                 fi
             fi
-            
+
             filtered_resources+=("$resource_id")
         done <<< "$resources"
-        
+
         [[ ${#filtered_resources[@]} -eq 0 ]] && continue
-        
+
         log_debug "Checking ${#filtered_resources[@]} resources for diagnostic settings in $sub_name (${MAX_PARALLEL} parallel)..."
-        
+
         # Process in parallel batches
         local batch_count=0
         for resource_id in "${filtered_resources[@]}"; do
@@ -1415,13 +1432,13 @@ discover_diagnostic_settings() {
                 local my_pid=$BASHPID
                 local diag_settings
                 diag_settings=$(az monitor diagnostic-settings list --resource "$resource_id" -o json 2>/dev/null || echo '[]')
-                
+
                 # Extract matching settings and write to temp file
                 echo "$diag_settings" | jq -c --arg rid "$resource_id" --arg sname "$sub_name" \
                     '.[]? | {name: .name, id: .id, resourceId: $rid, subName: $sname}' \
                     2>/dev/null > "$diag_tmp/r_${my_pid}.jsonl"
             ) &
-            
+
             ((batch_count++))
             if [[ $batch_count -ge $MAX_PARALLEL ]]; then
                 wait
@@ -1430,24 +1447,24 @@ discover_diagnostic_settings() {
         done
         wait  # Wait for remaining jobs in this subscription
     done <<< "$subscriptions"
-    
+
     # Merge results from all parallel jobs
     local diag_found=0
     for result_file in "$diag_tmp"/r_*.jsonl; do
         [[ -f "$result_file" ]] || continue
         [[ -s "$result_file" ]] || continue  # Skip empty files
-        
+
         while IFS= read -r setting; do
             [[ -z "$setting" || "$setting" == "null" ]] && continue
-            
+
             local name id target_resource sub_name
             name=$(jq -r '.name // ""' <<< "$setting")
             id=$(jq -r '.id // ""' <<< "$setting")
             target_resource=$(jq -r '.resourceId // ""' <<< "$setting")
             sub_name=$(jq -r '.subName // ""' <<< "$setting")
-            
+
             [[ -z "$name" || -z "$id" ]] && continue
-            
+
             # Multi-pattern matching
             local matched_pattern
             if matched_pattern=$(matches_any_pattern "$name"); then
@@ -1464,35 +1481,35 @@ discover_diagnostic_settings() {
             fi
         done < "$result_file"
     done
-    
+
     rm -rf "$diag_tmp"
     log_debug "Found $diag_found resource-level diagnostic settings"
-    
+
     # --- Phase 2: Subscription-level diagnostic settings (fast, no parallelism needed) ---
     while IFS= read -r sub; do
         [[ -z "$sub" ]] && continue
-        
+
         local sub_name
         sub_name=$(get_sub_name "$sub")
-        
+
         log_debug "Checking subscription-level diagnostic settings: $sub_name"
-        
+
         local subscription_diagnostics
         subscription_diagnostics=$(az monitor diagnostic-settings subscription list --subscription "$sub" -o json 2>/dev/null || echo '[]')
-        
+
         if ! jq -e '. | type == "array"' <<< "$subscription_diagnostics" >/dev/null 2>&1; then
             continue
         fi
-        
+
         while IFS= read -r setting; do
             [[ -z "$setting" ]] && continue
-            
+
             local name id
             name=$(jq -r '.name // ""' <<< "$setting")
             id=$(jq -r '.id // ""' <<< "$setting")
-            
+
             [[ -z "$name" || -z "$id" ]] && continue
-            
+
             # --- Multi-pattern matching ---
             local matched_pattern
             if matched_pattern=$(matches_any_pattern "$name"); then
@@ -1514,9 +1531,9 @@ discover_directory_diagnostic_settings() {
         log_debug "Skipping directory diagnostic settings discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Discovering AAD tenant-level diagnostic settings..."
-    
+
     local SETTINGS
     SETTINGS=$(az rest --method get \
         --url "https://management.azure.com/providers/microsoft.aadiam/diagnosticSettings?api-version=2017-04-01-preview" \
@@ -1539,15 +1556,15 @@ discover_directory_diagnostic_settings() {
 
     while IFS=$'\t' read -r name id; do
         [[ -z "$name" ]] && continue
-        
+
         echo "  → Found Azure AD Diagnostic Setting: $(highlight_matches "$name") (Default Directory)"
         log_to_file "FOUND" "Azure AD Diagnostic Setting: $name (Default Directory)"
         SUMMARY_ROWS+=("$name|DirectoryDiagnosticSetting|Tenant|AAD Diagnostic")
         ALL_IDS+=("$id")
-        
+
         RESOURCE_TYPES+=("$id|DirectoryDiagnosticSetting")
         RESOURCE_DETAILS+=("$id|$name|DirectoryDiagnosticSetting|Tenant|$id")
-        
+
         RESOURCES_FOUND=true
     done <<< "$FILTERED"
 }
@@ -1555,28 +1572,28 @@ discover_directory_diagnostic_settings() {
 discover_subscription_role_assignments() {
     local sub="$1"
     local sub_name="$2"
-    
+
     # Skip if subscriptions are excluded
     if is_service_excluded "subscriptions"; then
         log_debug "Skipping subscription role assignments discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_debug "Checking role assignments in subscription: $sub_name"
-    
+
     local assignments
     assignments=$(az role assignment list --subscription "$sub" -o json 2>/dev/null || echo '[]')
-    
+
     while IFS= read -r assignment; do
         [[ -z "$assignment" ]] && continue
-        
+
         local principal_name principal_id assignment_id principal_type scope
         principal_name=$(jq -r '.principalName // ""' <<< "$assignment")
         principal_id=$(jq -r '.principalId // ""' <<< "$assignment")
         assignment_id=$(jq -r '.id // ""' <<< "$assignment")
         principal_type=$(jq -r '.principalType // ""' <<< "$assignment")
         scope=$(jq -r '.scope // ""' <<< "$assignment")
-        
+
         # --- Multi-pattern matching ---
         local matched_pattern
         if matched_pattern=$(matches_any_pattern "$principal_name"); then
@@ -1597,26 +1614,26 @@ discover_policy_assignments() {
         log_debug "Skipping policy assignments discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching for policy assignments..."
-    
+
     local mgs
     mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null || echo "")
-    
+
     for mg in $mgs; do
         log_debug "Checking policy assignments in management group: $mg"
         local mg_assignments
         mg_assignments=$(az policy assignment list --scope "/providers/Microsoft.Management/managementGroups/$mg" -o json 2>/dev/null || echo '[]')
-        
+
         while IFS= read -r assignment; do
             [[ -z "$assignment" ]] && continue
-            
+
             local displayName name scope id
             displayName=$(jq -r '.displayName // ""' <<< "$assignment")
             name=$(jq -r '.name // ""' <<< "$assignment")
             scope=$(jq -r '.scope // ""' <<< "$assignment")
             id=$(jq -r '.id // ""' <<< "$assignment")
-            
+
             # --- Multi-pattern matching ---
             local matched_pattern
             if matched_pattern=$(matches_any_pattern "$displayName") || matched_pattern=$(matches_any_pattern "$name"); then
@@ -1630,29 +1647,29 @@ discover_policy_assignments() {
             fi
         done < <(jq -c '.[]' <<< "$mg_assignments")
     done
-    
+
     local subscriptions
     subscriptions=$(get_subscriptions)
-    
+
     while IFS= read -r sub; do
         [[ -z "$sub" ]] && continue
-        
+
         local sub_name
         sub_name=$(get_sub_name "$sub")
-        
+
         log_debug "Checking policy assignments in subscription: $sub_name"
         local sub_assignments
         sub_assignments=$(az policy assignment list --subscription "$sub" -o json 2>/dev/null || echo '[]')
-        
+
         while IFS= read -r assignment; do
             [[ -z "$assignment" ]] && continue
-            
+
             local displayName name scope id
             displayName=$(jq -r '.displayName // ""' <<< "$assignment")
             name=$(jq -r '.name // ""' <<< "$assignment")
             scope=$(jq -r '.scope // ""' <<< "$assignment")
             id=$(jq -r '.id // ""' <<< "$assignment")
-            
+
             # --- Multi-pattern matching ---
             local matched_pattern
             if matched_pattern=$(matches_any_pattern "$displayName") || matched_pattern=$(matches_any_pattern "$name"); then
@@ -1674,28 +1691,28 @@ discover_policy_remediations() {
         log_debug "Skipping policy remediations discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching for policy remediations..."
-    
+
     local subscriptions
     subscriptions=$(get_subscriptions)
-    
+
     while IFS= read -r sub; do
         [[ -z "$sub" ]] && continue
-        
+
         local sub_name
         sub_name=$(get_sub_name "$sub")
-        
+
         local remediations
         remediations=$(az policy remediation list --subscription "$sub" -o json 2>/dev/null || echo '[]')
-        
+
         while IFS= read -r remediation; do
             [[ -z "$remediation" ]] && continue
-            
+
             local name id
             name=$(jq -r '.name // ""' <<< "$remediation")
             id=$(jq -r '.id // ""' <<< "$remediation")
-            
+
             # --- Multi-pattern matching ---
             local matched_pattern
             if matched_pattern=$(matches_any_pattern "$name"); then
@@ -1717,28 +1734,28 @@ discover_management_group_deployments() {
         log_debug "Skipping management group deployments discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching for management group deployments..."
-    
+
     local mgs
     mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null || echo "")
-    
+
     if [[ -z "$mgs" ]]; then
         log_debug "No management groups found or access denied"
         return
     fi
-    
+
     for mg in $mgs; do
         local deployments
         deployments=$(az deployment mg list --management-group-id "$mg" -o json 2>/dev/null || echo '[]')
-        
+
         while IFS= read -r deployment; do
             [[ -z "$deployment" ]] && continue
-            
+
             local name id
             name=$(jq -r '.name // ""' <<< "$deployment")
             id=$(jq -r '.id // ""' <<< "$deployment")
-            
+
             # --- Multi-pattern matching ---
             local matched_pattern
             if matched_pattern=$(matches_any_pattern "$name"); then
@@ -1760,10 +1777,10 @@ discover_service_principals() {
         log_debug "Skipping service principals discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching for service principals..."
 
-    # --- Fetch all SPs once --- 
+    # --- Fetch all SPs once ---
     local all_sps
     all_sps=$(az ad sp list --all --query "[].[displayName,id,appId,publisherName]" -o tsv 2>/dev/null)
 
@@ -1777,7 +1794,7 @@ discover_service_principals() {
     while IFS=$'\t' read -r spName spId appId publisher; do
         [[ -z "$spName" ]] && continue
 
-        # --- Exclude known Microsoft system SPs --- 
+        # --- Exclude known Microsoft system SPs ---
         case "$spName" in
             Microsoft*|Azure*|Bot*|Office* )
                 continue
@@ -1787,7 +1804,7 @@ discover_service_principals() {
                 ;;
         esac
 
-        # --- Match against user-defined patterns (case-insensitive) --- 
+        # --- Match against user-defined patterns (case-insensitive) ---
         for pattern in "${NAME_PATTERNS[@]}"; do
             if [[ "$(normalize "$spName")" == *"$(normalize "$pattern")"* ]]; then
                 echo "  → Found Service Principal: $(highlight_matches "$spName") (ObjectID: $spId)"
@@ -1811,9 +1828,9 @@ discover_custom_roles_enhanced() {
         log_debug "Skipping custom roles discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Searching for custom roles..."
-    
+
     # --- Build query for multi-pattern support ---
     local roles=""
     for pattern in "${NAME_PATTERNS[@]}"; do
@@ -1823,23 +1840,23 @@ discover_custom_roles_enhanced() {
             roles+="$matches"$'\n'
         fi
     done
-    
+
     if [[ -z "$roles" ]]; then
         log_debug "No custom roles found matching patterns: ${NAME_PATTERNS[*]}"
         return
     fi
-    
+
     while IFS=$'\t' read -r roleName roleId scope_count; do
         [[ -z "$roleName" ]] && continue
-        
+
         local clean_roleName=$(echo "$roleName" | sed -E 's/\x1B\[[0-9;]*[mGK]//g')
-        
+
         local displayed_name
         displayed_name=$(highlight_matches "$clean_roleName")
-        
+
         echo "  → Found Custom Role: $displayed_name ($roleId)"
         log_to_file "FOUND" "Custom Role: $clean_roleName ($roleId)"
-        
+
         SUMMARY_ROWS+=("$clean_roleName|CustomRole|Tenant|Scopes: $scope_count")
         ALL_IDS+=("$roleId")
         RESOURCE_TYPES+=("$roleId|CustomRole")
@@ -1854,9 +1871,9 @@ discover_role_assignments_for_custom_roles() {
         log_debug "Skipping role assignments discovery (excluded via --exclude-service)"
         return
     fi
-    
+
     log_info "Discovering role assignments for custom roles..."
-    
+
     # --- Get custom roles matching any of our patterns ---
     local custom_roles=""
     for pattern in "${NAME_PATTERNS[@]}"; do
@@ -1866,39 +1883,39 @@ discover_role_assignments_for_custom_roles() {
             custom_roles+="$matches"$'\n'
         fi
     done
-    
+
     if [[ -z "$custom_roles" ]]; then
         log_debug "No custom roles found for patterns: ${NAME_PATTERNS[*]}"
         return
     fi
-    
+
     for role_id in $custom_roles; do
         [[ -z "$role_id" ]] && continue
-        
+
         local role_info
         role_info=$(az role definition show --name "$role_id" -o json 2>/dev/null || echo "{}")
         local role_name
         role_name=$(echo "$role_info" | jq -r '.roleName // ""')
-        
+
         if [[ -z "$role_name" ]]; then
             continue
         fi
-        
+
         log_debug "Checking assignments for role: $role_name"
-        
+
         local assignments
         assignments=$(az role assignment list --all --query "[?contains(roleDefinitionId, '$role_id')]" -o json 2>/dev/null || echo '[]')
-        
+
         while IFS= read -r assignment; do
             [[ -z "$assignment" ]] && continue
-            
+
             local principal_name principal_id assignment_id principal_type scope
             principal_name=$(jq -r '.principalName // ""' <<< "$assignment")
             principal_id=$(jq -r '.principalId // ""' <<< "$assignment")
             assignment_id=$(jq -r '.id // ""' <<< "$assignment")
             principal_type=$(jq -r '.principalType // ""' <<< "$assignment")
             scope=$(jq -r '.scope // ""' <<< "$assignment")
-            
+
             # --- Multi-pattern matching ---
             local matched_pattern
             if matched_pattern=$(matches_any_pattern "$principal_name"); then
@@ -1911,13 +1928,13 @@ discover_role_assignments_for_custom_roles() {
                 RESOURCES_FOUND=true
             fi
         done < <(jq -c '.[]' <<< "$assignments")
-        
+
         local unknown_assignments
         unknown_assignments=$(az role assignment list --all -o json 2>/dev/null | jq -r ".[] | select(.roleDefinitionName==\"Unknown\" and (.roleDefinitionId|contains(\"$role_id\"))) | .id" 2>/dev/null || echo "")
-        
+
         for assignment_id in $unknown_assignments; do
             [[ -z "$assignment_id" ]] && continue
-            
+
             if [[ ! " ${ALL_IDS[@]} " =~ " ${assignment_id} " ]]; then
                 echo "  → Found Unknown Role Assignment: $role_name (Orphaned)"
                 log_to_file "FOUND" "Unknown Role Assignment: $role_name (Orphaned)"
@@ -1972,15 +1989,15 @@ delete_role_assignment_enhanced() {
 delete_directory_diagnostic_setting() {
     local setting_id="$1"
     local setting_name="$2"
-    
+
     log_special "Deleting Azure AD Diagnostic Setting: $setting_name (Default Directory)"
-    
+
     local result
     result=$(az rest --method delete \
         --url "https://management.azure.com/providers/microsoft.aadiam/diagnosticSettings/${setting_name}?api-version=2017-04-01-preview" \
         2>&1)
     local exit_code=$?
-    
+
     if [[ $exit_code -eq 0 ]]; then
         log_success "Successfully deleted Azure AD Diagnostic Setting: $setting_name"
         return 0
@@ -1990,14 +2007,14 @@ delete_directory_diagnostic_setting() {
         check_result=$(az rest --method get \
             --url "https://management.azure.com/providers/microsoft.aadiam/diagnosticSettings/${setting_name}?api-version=2017-04-01-preview" \
             2>&1)
-        
+
         if [[ "$check_result" == *"NotFound"* ]] || [[ "$check_result" == *"ResourceNotFound"* ]]; then
             log_success "Azure AD Diagnostic Setting deleted successfully (verified): $setting_name"
             return 0
         else
             log_error "❌ Failed to delete Azure AD Diagnostic Setting: $setting_name"
             log_error "Error: $result"
-            
+
             if [[ "$result" == *"Permission"* ]] || [[ "$result" == *"authorized"* ]]; then
                 log_error "🔐 Insufficient permissions to delete Azure AD diagnostic settings."
                 log_error "Required permission: microsoft.aadiam/diagnosticSettings/delete"
@@ -2006,7 +2023,7 @@ delete_directory_diagnostic_setting() {
                 log_warning "⚠️  Azure AD diagnostic setting not found (may have been deleted already)"
                 return 0
             fi
-            
+
             return 1
         fi
     fi
@@ -2015,32 +2032,32 @@ delete_directory_diagnostic_setting() {
 delete_custom_role_enhanced() {
     local role_id="$1"
     local role_name="$2"
-    
+
     log_info "Attempting to delete Custom Role: $role_name (ID: $role_id)"
-    
+
     local role_info
     role_info=$(az role definition list --custom-role-only true --query "[?name=='$role_id'] | [0]" -o json 2>/dev/null || echo "{}")
-    
+
     if [[ "$role_info" == "{}" || "$role_info" == "null" ]]; then
         log_warning "Custom Role not found: $role_name (ID: $role_id)"
         return 1
     fi
-    
+
     local actual_role_name
     actual_role_name=$(echo "$role_info" | jq -r '.roleName // ""')
     local role_scope
     role_scope=$(echo "$role_info" | jq -r '.assignableScopes[0] // ""')
-    
+
     if [[ -z "$actual_role_name" ]]; then
         log_error "Could not retrieve role information for ID: $role_id"
         return 1
     fi
-    
+
     log_info "Found Custom Role: $actual_role_name (Scope: $role_scope)"
-    
+
     local result
     local exit_code
-    
+
     if [[ -n "$role_scope" && "$role_scope" != "null" ]]; then
         log_info "Deleting role using scope: $role_scope"
         result=$(az role definition delete --name "$role_id" --scope "$role_scope" 2>&1)
@@ -2057,14 +2074,14 @@ delete_custom_role_enhanced() {
             exit_code=$?
         fi
     fi
-    
+
     if [[ $exit_code -eq 0 ]]; then
         log_success "Successfully deleted Custom Role: $actual_role_name"
         return 0
     else
         log_error "Failed to delete Custom Role: $actual_role_name"
         log_warning "Error: $result"
-        
+
         if [[ "$result" == *"scope"* ]]; then
             log_info "Trying alternative role deletion approach..."
             try_alternative_role_deletion "$role_id" "$role_name"
@@ -2075,35 +2092,35 @@ delete_custom_role_enhanced() {
 try_alternative_role_deletion() {
     local role_id="$1"
     local role_name="$2"
-    
+
     log_info "Trying alternative method to delete role: $role_name"
-    
+
     local all_custom_roles
     all_custom_roles=$(az role definition list --custom-role-only true -o json 2>/dev/null || echo "[]")
-    
+
     local role_info
     role_info=$(echo "$all_custom_roles" | jq -r ".[] | select(.name == \"$role_id\")")
-    
+
     if [[ -z "$role_info" || "$role_info" == "null" ]]; then
         log_warning "Role not found in custom roles list: $role_name"
         return 1
     fi
-    
+
     local scopes
     scopes=$(echo "$role_info" | jq -r '.assignableScopes[]?')
-    
+
     if [[ -z "$scopes" ]]; then
         log_error "No assignable scopes found for role: $role_name"
         return 1
     fi
-    
+
     local deleted=false
     while IFS= read -r scope; do
         [[ -z "$scope" ]] && continue
         log_info "Trying to delete with scope: $scope"
         local result
         result=$(az role definition delete --name "$role_id" --scope "$scope" 2>&1)
-        
+
         if [[ $? -eq 0 ]]; then
             log_success "Successfully deleted Custom Role: $role_name using scope: $scope"
             deleted=true
@@ -2112,7 +2129,7 @@ try_alternative_role_deletion() {
             log_warning "Failed to delete with scope $scope: $result"
         fi
     done <<< "$scopes"
-    
+
     if [[ "$deleted" == true ]]; then
         return 0
     else
@@ -2127,7 +2144,7 @@ delete_with_retry() {
     local type="$2"
     local max_retries=3
     local retry_delay=10
-    
+
     for ((retry=1; retry<=max_retries; retry++)); do
         if az resource delete --ids "$id" --no-wait 2>/dev/null; then
             log_success "Delete command issued for $type: $(basename "$id")"
@@ -2146,9 +2163,9 @@ delete_with_retry() {
 delete_management_group_role_assignment() {
     local assignment_id="$1"
     local assignment_name="$2"
-    
+
     log_special "Deleting Management Group Role Assignment: $assignment_name"
-    
+
     if az role assignment delete --ids "$assignment_id" 2>/dev/null; then
         log_success "Deleted Management Group Role Assignment: $assignment_name"
         return 0
@@ -2161,9 +2178,9 @@ delete_management_group_role_assignment() {
 delete_subscription_role_assignment() {
     local assignment_id="$1"
     local assignment_name="$2"
-    
+
     log_special "Deleting Subscription Role Assignment: $assignment_name"
-    
+
     if az role assignment delete --ids "$assignment_id" 2>/dev/null; then
         log_success "Deleted Subscription Role Assignment: $assignment_name"
         return 0
@@ -2177,13 +2194,13 @@ delete_policy_assignment() {
     local assignment_id="$1"
     local assignment_name="$2"
     local assignment_scope="$3"
-    
+
     log_special "Deleting Policy Assignment: $assignment_name (Scope: $assignment_scope)"
-    
+
     local result
     result=$(az policy assignment delete --name "$(basename "$assignment_id")" --scope "$assignment_scope" 2>&1)
     local exit_code=$?
-    
+
     if [[ $exit_code -eq 0 ]]; then
         log_success "Successfully deleted Policy Assignment: $assignment_name"
         return 0
@@ -2191,7 +2208,7 @@ delete_policy_assignment() {
         log_error "❌ Failed to delete Policy Assignment: $assignment_name"
         log_error "Exit code: $exit_code"
         log_error "Error output: $result"
-        
+
         if [[ "$result" == *"Permission"* ]] || [[ "$result" == *"authorized"* ]] || [[ "$result" == *"access"* ]]; then
             log_error "🔐 Insufficient permissions to delete policy assignment."
             log_error "Required permission: Microsoft.Authorization/policyAssignments/delete"
@@ -2202,7 +2219,7 @@ delete_policy_assignment() {
         else
             log_error "💥 Unknown error occurred. Please check the error message above."
         fi
-        
+
         return 1
     fi
 }
@@ -2210,9 +2227,9 @@ delete_policy_assignment() {
 delete_policy_remediation() {
     local remediation_id="$1"
     local remediation_name="$2"
-    
+
     log_special "Deleting Policy Remediation: $remediation_name"
-    
+
     if az policy remediation delete --ids "$remediation_id" 2>/dev/null; then
         log_success "Deleted Policy Remediation: $remediation_name"
         return 0
@@ -2226,9 +2243,9 @@ delete_management_group_deployment() {
     local deployment_id="$1"
     local deployment_name="$2"
     local mg_id="$3"
-    
+
     log_special "Deleting Management Group Deployment: $deployment_name"
-    
+
     if az deployment mg delete --name "$deployment_name" --management-group-id "$mg_id" 2>/dev/null; then
         log_success "Deleted Management Group Deployment: $deployment_name"
         return 0
@@ -2241,14 +2258,14 @@ delete_management_group_deployment() {
 delete_service_principal() {
     local sp_id="$1"
     local sp_name="$2"
-    
+
     log_info "Processing Service Principal: $sp_name"
-    
+
     if ! az ad sp show --id "$sp_id" &>/dev/null; then
         log_success "Service Principal already deleted: $sp_name"
         return 0
     fi
-    
+
     local assignment_count=0
     while IFS= read -r assignment_id; do
         [[ -z "$assignment_id" ]] && continue
@@ -2256,11 +2273,11 @@ delete_service_principal() {
         log_debug "Removing role assignment: $assignment_id"
         az role assignment delete --ids "$assignment_id" 2>/dev/null || true
     done < <(az role assignment list --assignee "$sp_id" --query "[].id" -o tsv 2>/dev/null)
-    
+
     if [[ $assignment_count -gt 0 ]]; then
         log_success "Removed $assignment_count role assignments from $sp_name"
     fi
-    
+
     local app_id
     app_id=$(az ad sp show --id "$sp_id" --query "appId" -o tsv 2>/dev/null || echo "")
     if [[ -n "$app_id" ]]; then
@@ -2270,7 +2287,7 @@ delete_service_principal() {
             sleep 5
         fi
     fi
-    
+
     if az ad sp delete --id "$sp_id" 2>/dev/null; then
         log_success "Deleted Service Principal: $sp_name"
     else
@@ -2283,13 +2300,13 @@ delete_resource_group() {
     local rg_id="$1"
     local rg_name="$2"
     local sub_id="$3"
-    
+
     log_warning "Resource Group detected: $rg_name (contains ALL resources within it)"
-    
-    # --- Check if this resource group contains any excluded resources --- 
+
+    # --- Check if this resource group contains any excluded resources ---
     local has_excluded=false
     local excluded_list=""
-    
+
     for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
         if [[ "$item" == "$rg_name|"* ]]; then
             has_excluded=true
@@ -2301,19 +2318,19 @@ delete_resource_group() {
             fi
         fi
     done
-    
+
     if [[ "$has_excluded" == true ]]; then
         log_warning "   SKIPPING Resource Group deletion: $rg_name"
         log_warning "   Reason: Contains excluded resources: $excluded_list"
         log_warning "   Delete the excluded resources first or remove them from exclude patterns"
         return 0
     fi
-    
+
     if [[ "$DRY_RUN" == true ]]; then
         log_info "DRY RUN: Would delete resource group: $rg_name"
         return 0
     fi
-    
+
     if [[ "$DELETE_MODE" == true ]]; then
         read -p "Delete this resource group and ALL its contents? (yes/no): " rg_confirm
         if [[ "$rg_confirm" != "yes" ]]; then
@@ -2321,7 +2338,7 @@ delete_resource_group() {
             return 0
         fi
     fi
-    
+
     if az group delete --name "$rg_name" --subscription "$sub_id" --yes --no-wait 2>/dev/null; then
         log_success "Delete command issued for Resource Group: $rg_name"
         return 0
@@ -2342,7 +2359,7 @@ init_logging() {
                 LOG_FILE=$(basename "$LOG_FILE")
             }
         fi
-        
+
         # Check if we can write to the log file
         if [[ "$APPEND_LOG" == true ]] && [[ -f "$LOG_FILE" ]]; then
             # Append mode: check if we can append
@@ -2361,8 +2378,8 @@ init_logging() {
                 return
             fi
         fi
-        
-        # --- Write header based on mode --- 
+
+        # --- Write header based on mode ---
         if [[ "$APPEND_LOG" == true ]] && [[ -f "$LOG_FILE" ]]; then
             # Append mode: add separator and new execution header
             echo "" >> "$LOG_FILE"
@@ -2376,25 +2393,25 @@ init_logging() {
             echo "AZURE RESOURCE CLEANUP AUDIT LOG" >> "$LOG_FILE"
             echo "==================================================================================" >> "$LOG_FILE"
         fi
-        
-        # --- Common header information --- 
+
+        # --- Common header information ---
         echo "Execution Start  : $(date '+%Y-%m-%d %H:%M:%S %Z')" >> "$LOG_FILE"
         echo "User             : $(whoami)@$(hostname)" >> "$LOG_FILE"
-        
-        # --- Get Azure user info --- 
+
+        # --- Get Azure user info ---
         local az_user=$(az account show --query 'user.name' -o tsv 2>/dev/null || echo "Unknown")
         echo "Azure User       : $az_user" >> "$LOG_FILE"
-        
+
         local tenant_id=$(az account show --query 'tenantId' -o tsv 2>/dev/null || echo "Unknown")
         echo "Tenant ID        : $tenant_id" >> "$LOG_FILE"
-        
+
         if [[ -n "$SUBSCRIPTION_ID" ]]; then
             local sub_name=$(get_sub_name "$SUBSCRIPTION_ID")
             echo "Subscription     : $SUBSCRIPTION_ID ($sub_name)" >> "$LOG_FILE"
         else
             echo "Subscription     : All enabled subscriptions" >> "$LOG_FILE"
         fi
-        
+
         # Add exclude subscription info
         if [[ -n "$EXCLUDE_SUBSCRIPTIONS" ]]; then
             echo "Exclude Subs     : $EXCLUDE_SUBSCRIPTIONS" >> "$LOG_FILE"
@@ -2402,10 +2419,10 @@ init_logging() {
         else
             echo "Exclude Subs     : None" >> "$LOG_FILE"
         fi
-        
+
         echo "Mode             : $([[ "$DRY_RUN" == true ]] && echo "DRY-RUN" || echo "DELETE")" >> "$LOG_FILE"
         echo "Log Mode         : $([[ "$APPEND_LOG" == true ]] && echo "APPEND" || echo "OVERWRITE")" >> "$LOG_FILE"
-        
+
         if [[ -n "$TAG_FILTER" ]]; then
             echo "Search Type      : Tag Filter" >> "$LOG_FILE"
             echo "Tag Filter       : $TAG_FILTER" >> "$LOG_FILE"
@@ -2416,17 +2433,17 @@ init_logging() {
             echo "Search Type      : Name Pattern" >> "$LOG_FILE"
             echo "Patterns         : $NAME_PATTERN" >> "$LOG_FILE"
         fi
-        
+
         if [[ -n "$EXCLUDE_PATTERNS" ]]; then
             echo "Exclude Patterns : $EXCLUDE_PATTERNS" >> "$LOG_FILE"
         else
             echo "Exclude Patterns : None" >> "$LOG_FILE"
         fi
-        
+
         echo "Log File         : $LOG_FILE" >> "$LOG_FILE"
         echo "==================================================================================" >> "$LOG_FILE"
         echo "" >> "$LOG_FILE"
-        
+
         log_audit "Audit logging enabled: $LOG_FILE ($([[ "$APPEND_LOG" == true ]] && echo "APPEND" || echo "OVERWRITE") mode)"
         log_to_file "INFO" "Logging initialized"
     fi
@@ -2436,7 +2453,7 @@ init_logging() {
 check_log_file_access() {
     local log_file="$1"
     local mode="$2"  # "append" or "overwrite"
-    
+
     if [[ "$mode" == "append" ]]; then
         if [[ -f "$log_file" ]]; then
             if [[ ! -w "$log_file" ]]; then
@@ -2458,7 +2475,7 @@ check_log_file_access() {
         fi
         touch "$log_file" 2>/dev/null || return 1
     fi
-    
+
     return 0
 }
 
@@ -2467,12 +2484,12 @@ apply_exclude_filters() {
     local original_count=${#ALL_IDS[@]}
     declare -a FILTERED_IDS=()
     declare -a FILTERED_SUMMARY_ROWS=()
-    
+
     # Create arrays to track excluded resources with their details
     declare -a NEW_EXCLUDED_IDS=()
     declare -a NEW_EXCLUDED_DETAILS=()
     declare -a NEW_EXCLUDED_SUMMARY_ROWS=()
-    
+
     # Start with existing excluded IDs if any
     if [[ ${#EXCLUDED_IDS[@]} -gt 0 ]]; then
         NEW_EXCLUDED_IDS=("${EXCLUDED_IDS[@]}")
@@ -2484,16 +2501,16 @@ apply_exclude_filters() {
             NEW_EXCLUDED_SUMMARY_ROWS=("${EXCLUDED_SUMMARY_ROWS[@]}")
         fi
     fi
-    
+
     for i in "${!ALL_IDS[@]}"; do
         local id="${ALL_IDS[$i]}"
         local row="${SUMMARY_ROWS[$i]}"
-        
+
         # Get resource details
         local resource_type=""
         local resource_name=""
         local resource_details=""
-        
+
         # Try to get from RESOURCE_TYPES
         for item in "${RESOURCE_TYPES[@]}"; do
             if [[ "$item" == "$id|"* ]]; then
@@ -2501,7 +2518,7 @@ apply_exclude_filters() {
                 break
             fi
         done
-        
+
         # Try to get from RESOURCE_DETAILS
         for item in "${RESOURCE_DETAILS[@]}"; do
             if [[ "$item" == "$id|"* ]]; then
@@ -2511,10 +2528,10 @@ apply_exclude_filters() {
                 break
             fi
         done
-        
+
         # Clean resource name for comparison
         clean_resource_name=$(echo "$resource_name" | sed -E 's/\x1B\[[0-9;]*[mGK]//g' | xargs)
-        
+
         # Check if already excluded (from previous runs)
         local already_excluded=false
         for excluded_id in "${NEW_EXCLUDED_IDS[@]}"; do
@@ -2523,12 +2540,12 @@ apply_exclude_filters() {
                 break
             fi
         done
-        
+
         if [[ "$already_excluded" == true ]]; then
             # Already excluded, keep it excluded
             continue
         fi
-        
+
         # Check if should be excluded now
         if should_exclude "$clean_resource_name" "$resource_type" "$id"; then
             NEW_EXCLUDED_IDS+=("$id")
@@ -2536,13 +2553,13 @@ apply_exclude_filters() {
                 NEW_EXCLUDED_DETAILS+=("$resource_details")
             fi
             NEW_EXCLUDED_SUMMARY_ROWS+=("$row")
-            
+
             # Track for resource groups
             if [[ "$id" == */resourceGroups/* ]]; then
                 local rg_name
                 if [[ "$id" =~ /resourceGroups/([^/]+)/ ]]; then
                     rg_name="${BASH_REMATCH[1]}"
-                    
+
                     local already_tracked=false
                     for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
                         if [[ "$item" == "$rg_name|$clean_resource_name|$resource_type" ]]; then
@@ -2550,7 +2567,7 @@ apply_exclude_filters() {
                             break
                         fi
                     done
-                    
+
                     if [[ "$already_tracked" == false ]]; then
                         RG_EXCLUDED_RESOURCES+=("$rg_name|$clean_resource_name|$resource_type")
                     fi
@@ -2561,7 +2578,7 @@ apply_exclude_filters() {
             FILTERED_SUMMARY_ROWS+=("$row")
         fi
     done
-    
+
     # Filter resource details arrays to match filtered IDs
     declare -a FILTERED_RESOURCE_DETAILS=()
     for id in "${FILTERED_IDS[@]}"; do
@@ -2572,11 +2589,11 @@ apply_exclude_filters() {
             fi
         done
     done
-    
+
     # Calculate how many NEW exclusions were added
     local previous_excluded_count=${#EXCLUDED_IDS[@]}
     local new_exclusions_count=$((${#NEW_EXCLUDED_IDS[@]} - ${#EXCLUDED_IDS[@]}))
-    
+
     # Update global arrays
     ALL_IDS=("${FILTERED_IDS[@]}")
     SUMMARY_ROWS=("${FILTERED_SUMMARY_ROWS[@]}")
@@ -2584,14 +2601,14 @@ apply_exclude_filters() {
     EXCLUDED_RESOURCE_DETAILS=("${NEW_EXCLUDED_DETAILS[@]}")
     EXCLUDED_SUMMARY_ROWS=("${NEW_EXCLUDED_SUMMARY_ROWS[@]}")
     RESOURCE_DETAILS=("${FILTERED_RESOURCE_DETAILS[@]}")
-    
+
     local remaining_count=${#ALL_IDS[@]}
     local total_excluded_count=${#EXCLUDED_IDS[@]}
-    
+
     if [[ $new_exclusions_count -gt 0 ]]; then
         log_info "Excluded $new_exclusions_count additional resource(s)"
     fi
-    
+
     log_info "Total excluded resources: $total_excluded_count"
     log_info "Remaining resources to delete: $remaining_count"
 }
@@ -2602,29 +2619,40 @@ show_updated_summary() {
     echo "========================================================="
     echo "               ${PURPLE}Updated Summary Table${NC}               "
     echo "========================================================="
-    
+
     log_success "Found ${#ALL_IDS[@]} matching resource(s) for deletion"
     if [[ ${#EXCLUDED_IDS[@]} -gt 0 ]]; then
         echo -e "${YELLOW}⚠️  Total excluded resources: ${#EXCLUDED_IDS[@]}${NC}"
     fi
-    
+
     echo
     printf "%-55s %-50s %-25s %-40s\n" "-------------------------------------------------------" "--------------------------------------------------" "-------------------------" "----------------------------------------"
     printf "%-55s %-50s %-25s %-40s\n" "NAME" "TYPE" "SCOPE" "DETAILS"
     printf "%-55s %-50s %-25s %-40s\n" "-------------------------------------------------------" "--------------------------------------------------" "-------------------------" "----------------------------------------"
-    
+
     for row in "${SUMMARY_ROWS[@]}"; do
         IFS="|" read -r name type scope details <<< "$row"
         clean_name=$(echo "$name" | sed -E 's/\x1B\[[0-9;]*[mGK]//g')
         printf "%-55s %-50s %-25s %-40s\n" "$clean_name" "$type" "$scope" "$details"
+
+        # TSV EXPORT HOOK
+        if [[ -n "$TSV_FILE" ]]; then
+            # Clean up potential tabs inside the details field before exporting
+            clean_details=$(echo "$details" | tr '\t' ' ')
+            echo -e "${clean_name}\t${type}\t${scope}\t${clean_details}" >> "$TSV_FILE"
+        fi
     done
-    
+
+    if [[ -n "$TSV_FILE" && ${#SUMMARY_ROWS[@]} -gt 0 ]]; then
+        echo -e "${GREEN}✅ TSV export successful: appended ${#SUMMARY_ROWS[@]} records to $TSV_FILE${NC}"
+    fi
+
     if [[ ${#RG_EXCLUDED_RESOURCES[@]} -gt 0 ]]; then
         echo ""
         echo "========================================================="
         echo "      Resource Groups with Excluded Resources            "
         echo "========================================================="
-        
+
         declare -a unique_rgs=()
         for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
             IFS="|" read -r rg_name _ _ <<< "$item"
@@ -2632,16 +2660,16 @@ show_updated_summary() {
                 unique_rgs+=("$rg_name")
             fi
         done
-        
+
         for rg_name in "${unique_rgs[@]}"; do
             echo -e "${YELLOW}⚠️  Resource Group: $rg_name${NC}"
             echo "   Contains excluded resources:"
-            
+
             declare -a shown_resources=()
             for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
                 if [[ "$item" == "$rg_name|"* ]]; then
                     IFS="|" read -r _ excluded_resource excluded_type <<< "$item"
-                    
+
                     local resource_key="$excluded_resource|$excluded_type"
                     if [[ ! " ${shown_resources[@]} " =~ " ${resource_key} " ]]; then
                         echo "    • $excluded_resource ($excluded_type)"
@@ -2655,17 +2683,16 @@ show_updated_summary() {
     echo "========================================================="
 }
 
-
 # --- Enhanced Confirmation Function with Exclusion Prompt ---
 confirm_delete() {
     echo
     log_warning "${RED}WARNING: You are about to DELETE ${#ALL_IDS[@]} resource(s)${NC}"
     log_warning "${RED}This operation cannot be undone!${NC}"
     echo
-    
+
     # --- Get actual matched exclude names from excluded resources ---
     declare -a ACTUAL_EXCLUDED_NAMES=()
-    
+
     # First try to get names from EXCLUDED_RESOURCE_DETAILS
     for detail in "${EXCLUDED_RESOURCE_DETAILS[@]}"; do
         IFS="|" read -r _ name _ _ _ <<< "$detail"
@@ -2680,14 +2707,14 @@ confirm_delete() {
                         break
                     fi
                 done
-                
+
                 if [[ "$already_listed" == false ]]; then
                     ACTUAL_EXCLUDED_NAMES+=("$clean_name")
                 fi
             fi
         fi
     done
-    
+
     # If we couldn't get names from details, try from EXCLUDED_SUMMARY_ROWS
     if [[ ${#ACTUAL_EXCLUDED_NAMES[@]} -eq 0 ]] && [[ ${#EXCLUDED_SUMMARY_ROWS[@]} -gt 0 ]]; then
         for row in "${EXCLUDED_SUMMARY_ROWS[@]}"; do
@@ -2703,7 +2730,7 @@ confirm_delete() {
                             break
                         fi
                     done
-                    
+
                     if [[ "$already_listed" == false ]]; then
                         ACTUAL_EXCLUDED_NAMES+=("$clean_name")
                     fi
@@ -2711,7 +2738,7 @@ confirm_delete() {
             fi
         done
     fi
-    
+
     # --- Prompt for additional exclusions ---
     echo -e "${YELLOW}📋 Currently excluded resources (exact matches):${NC}"
     if [[ ${#ACTUAL_EXCLUDED_NAMES[@]} -gt 0 ]]; then
@@ -2722,30 +2749,30 @@ confirm_delete() {
     else
         echo "  (No resources excluded yet)"
     fi
-    
+
     # Show unused exclude patterns if any
     if [[ -n "$EXCLUDE_PATTERNS" ]]; then
         declare -a UNUSED_EXCLUDES=()
         IFS=',' read -ra ALL_EXCLUDES <<< "$EXCLUDE_PATTERNS"
-        
+
         for exclude_name in "${ALL_EXCLUDES[@]}"; do
             exclude_name=$(echo "$exclude_name" | xargs)
             [[ -z "$exclude_name" ]] && continue
-            
+
             local found=false
-            
+
             for actual_name in "${ACTUAL_EXCLUDED_NAMES[@]}"; do
                 if [[ "$exclude_name" == "$actual_name" ]]; then
                     found=true
                     break
                 fi
             done
-            
+
             if [[ "$found" == false ]]; then
                 UNUSED_EXCLUDES+=("$exclude_name")
             fi
         done
-        
+
         if [[ ${#UNUSED_EXCLUDES[@]} -gt 0 ]]; then
             echo
             echo -e "${YELLOW}📝 Unused exclude names (no matches found):${NC}"
@@ -2754,11 +2781,11 @@ confirm_delete() {
             done
         fi
     fi
-    
+
     echo
-    
+
     read -p "Do you want to add more resources to exclude? (yes/no): " add_exclude
-    
+
     if [[ "$add_exclude" == "yes" || "$add_exclude" == "y" ]]; then
         echo -e "${CYAN}Enter additional resource names to exclude (comma-separated, exact match):${NC}"
         echo -e "${CYAN}Examples:${NC}"
@@ -2766,38 +2793,38 @@ confirm_delete() {
         echo -e "  • specific-vm-name,storage-account-name"
         echo -e "${CYAN}Note: Only exact name matches will be excluded${NC}"
         echo -e "${CYAN}Leave empty to keep current excludes:${NC}"
-        
+
         read -p "Additional resource names to exclude: " additional_excludes
-        
+
         if [[ -n "$additional_excludes" ]]; then
             # Clean up the input
             additional_excludes=$(echo "$additional_excludes" | xargs)
-            
+
             # Append to existing excludes
             if [[ -n "$EXCLUDE_PATTERNS" ]]; then
                 EXCLUDE_PATTERNS="$EXCLUDE_PATTERNS,$additional_excludes"
             else
                 EXCLUDE_PATTERNS="$additional_excludes"
             fi
-            
+
             # Update exclude array
             IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDE_PATTERNS"
             # Trim whitespace from each pattern
             for i in "${!EXCLUDE_ARRAY[@]}"; do
                 EXCLUDE_ARRAY[$i]=$(echo "${EXCLUDE_ARRAY[$i]}" | xargs)
             done
-            
+
             echo -e "${GREEN}✅ Updated exclude names: $EXCLUDE_PATTERNS${NC}"
-            
+
             # Re-apply exclude filtering
             echo -e "${YELLOW}Re-applying exclude filters...${NC}"
             apply_exclude_filters
-            
+
             if [[ ${#ALL_IDS[@]} -eq 0 ]]; then
                 log_success "All resources would be excluded. Nothing to delete."
                 exit 0
             fi
-            
+
             # Show updated summary
             show_updated_summary
         else
@@ -2808,14 +2835,14 @@ confirm_delete() {
     else
         echo -e "${YELLOW}Invalid input. Proceeding with current exclusions.${NC}"
     fi
-    
+
     echo
     log_warning "${RED}FINAL CONFIRMATION: You are about to DELETE ${#ALL_IDS[@]} resource(s)${NC}"
     log_warning "${RED}This operation cannot be undone!${NC}"
     echo
-    
+
     read -p "Are you absolutely sure you want to proceed? (type 'DELETE' to confirm): " confirmation
-    
+
     if [[ "$confirmation" != "DELETE" ]]; then
         log_warning "Deletion aborted"
         echo
@@ -2823,45 +2850,44 @@ confirm_delete() {
     fi
 }
 
-
     # --- Deduplicate Resources Function ---
 deduplicate_resources() {
     log_debug "Deduplicating resource list..."
-    
+
     declare -a UNIQUE_IDS=()
     declare -a UNIQUE_SUMMARY_ROWS=()
     declare -a UNIQUE_RESOURCE_TYPES=()
     declare -a UNIQUE_RESOURCE_DETAILS=()
     declare -a UNIQUE_RG_SUBSCRIPTION=()
-    
+
     # Create associative arrays for tracking
     declare -A seen_ids
     declare -A seen_summary_rows
-    
+
     for i in "${!ALL_IDS[@]}"; do
         local id="${ALL_IDS[$i]}"
         local summary_row="${SUMMARY_ROWS[$i]}"
-        
+
         # Skip if we've already seen this ID
         if [[ -n "${seen_ids[$id]}" ]]; then
             log_debug "Removing duplicate resource ID: $id"
             continue
         fi
-        
+
         # Also check for duplicate summary rows (same name/type/scope)
         if [[ -n "${seen_summary_rows[$summary_row]}" ]]; then
             log_debug "Removing duplicate summary row: $summary_row"
             continue
         fi
-        
+
         # Mark as seen
         seen_ids[$id]=1
         seen_summary_rows[$summary_row]=1
-        
+
         # Add to unique arrays
         UNIQUE_IDS+=("$id")
         UNIQUE_SUMMARY_ROWS+=("$summary_row")
-        
+
         # Find and add corresponding entries from other arrays
         for j in "${!RESOURCE_TYPES[@]}"; do
             if [[ "${RESOURCE_TYPES[$j]}" == "$id|"* ]]; then
@@ -2869,14 +2895,14 @@ deduplicate_resources() {
                 break
             fi
         done
-        
+
         for j in "${!RESOURCE_DETAILS[@]}"; do
             if [[ "${RESOURCE_DETAILS[$j]}" == "$id|"* ]]; then
                 UNIQUE_RESOURCE_DETAILS+=("${RESOURCE_DETAILS[$j]}")
                 break
             fi
         done
-        
+
         for j in "${!RG_SUBSCRIPTION[@]}"; do
             if [[ "${RG_SUBSCRIPTION[$j]}" == "$id|"* ]]; then
                 UNIQUE_RG_SUBSCRIPTION+=("${RG_SUBSCRIPTION[$j]}")
@@ -2884,14 +2910,14 @@ deduplicate_resources() {
             fi
         done
     done
-    
+
     # Update global arrays
     ALL_IDS=("${UNIQUE_IDS[@]}")
     SUMMARY_ROWS=("${UNIQUE_SUMMARY_ROWS[@]}")
     RESOURCE_TYPES=("${UNIQUE_RESOURCE_TYPES[@]}")
     RESOURCE_DETAILS=("${UNIQUE_RESOURCE_DETAILS[@]}")
     RG_SUBSCRIPTION=("${UNIQUE_RG_SUBSCRIPTION[@]}")
-    
+
     log_debug "After deduplication: ${#ALL_IDS[@]} unique resources"
 }
 
@@ -2899,7 +2925,7 @@ deduplicate_resources() {
 log_summary() {
     if [[ "$LOG_ENABLED" == true ]] && [[ -n "$LOG_FILE" ]]; then
         local end_time=$(date '+%Y-%m-%d %H:%M:%S %Z')
-        
+
         # For append mode, we need to find the start time from this execution's header
         local start_time
         if [[ "$APPEND_LOG" == true ]] && [[ -f "$LOG_FILE" ]]; then
@@ -2920,14 +2946,14 @@ log_summary() {
             # For overwrite mode, get from the first line
             start_time=$(grep "Execution Start" "$LOG_FILE" | head -1 | cut -d':' -f2- | sed 's/^ *//')
         fi
-        
+
         echo "" >> "$LOG_FILE"
         echo "==================================================================================" >> "$LOG_FILE"
         echo "EXECUTION SUMMARY" >> "$LOG_FILE"
         echo "==================================================================================" >> "$LOG_FILE"
         echo "Start Time      : $start_time" >> "$LOG_FILE"
         echo "End Time        : $end_time" >> "$LOG_FILE"
-        
+
         # Calculate duration
         local start_epoch=$(date -d "$start_time" +%s 2>/dev/null || echo 0)
         local end_epoch=$(date -d "$end_time" +%s 2>/dev/null || echo 0)
@@ -2938,7 +2964,7 @@ log_summary() {
             local seconds=$((duration % 60))
             echo "Duration        : $(printf "%02d:%02d:%02d" $hours $minutes $seconds)" >> "$LOG_FILE"
         fi
-        
+
         echo "Mode            : $([[ "$DRY_RUN" == true ]] && echo "DRY-RUN" || echo "DELETE")" >> "$LOG_FILE"
         echo "Log Mode        : $([[ "$APPEND_LOG" == true ]] && echo "APPEND" || echo "OVERWRITE")" >> "$LOG_FILE"
         echo "Search Type     : " >> "$LOG_FILE"
@@ -2949,15 +2975,15 @@ log_summary() {
         elif [[ -n "$NAME_PATTERN" ]]; then
             echo "                : Name Pattern(s): $NAME_PATTERN" >> "$LOG_FILE"
         fi
-        
+
         if [[ -n "$EXCLUDE_SUBSCRIPTIONS" ]]; then
             echo "Exclude Subs     : $EXCLUDE_SUBSCRIPTIONS" >> "$LOG_FILE"
         fi
-        
+
         echo "Resources Found     : $((${#ALL_IDS[@]} + ${#EXCLUDED_IDS[@]}))" >> "$LOG_FILE"
         echo "Resources Deleted   : ${#ALL_IDS[@]}" >> "$LOG_FILE"
         echo "Resources Excluded  : ${#EXCLUDED_IDS[@]}" >> "$LOG_FILE"
-        
+
         # Count resource groups with excluded resources
         declare -a unique_rgs=()
         for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
@@ -2967,16 +2993,16 @@ log_summary() {
             fi
         done
         echo "Resource Groups Skipped : ${#unique_rgs[@]} (contained excluded resources)" >> "$LOG_FILE"
-        
+
         # Count failed deletions
         if [[ "$DRY_RUN" != true ]] && [[ "$DELETE_MODE" == true ]]; then
             # This is a placeholder - you should track failed deletions during the deletion phase
             local failed_count=0
             echo "Resources Failed      : $failed_count" >> "$LOG_FILE"
         fi
-        
+
         echo "==================================================================================" >> "$LOG_FILE"
-        
+
         # For append mode, add a separator for the next execution
         if [[ "$APPEND_LOG" == true ]]; then
             echo "" >> "$LOG_FILE"
@@ -2991,15 +3017,15 @@ log_summary() {
 main() {
     # Initialize logging
     init_logging
-    
+
     log_info "Mode: $([[ "$DRY_RUN" == true ]] && echo ${YELLOW}"DRY-RUN"${NC} || echo ${YELLOW}"DELETE"${NC})"
-    
+
     # Add log mode info
     if [[ "$LOG_ENABLED" == true ]]; then
         log_info "Log Mode: $([[ "$APPEND_LOG" == true ]] && echo ${YELLOW}"APPEND"${NC} || echo ${YELLOW}"OVERWRITE"${NC})"
     fi
     echo
-    
+
     # Display excluded services
     if [[ ${#EXCLUDE_SERVICE_ARRAY[@]} -gt 0 ]]; then
         log_info "Excluding service types from discovery:"
@@ -3008,7 +3034,7 @@ main() {
             log_info "  • ${YELLOW}$display_name${NC}"
         done
     fi
-    
+
     if [[ -n "$TAG_FILTER" ]]; then
         log_info "Searching for resources with tag: ${YELLOW}$TAG_FILTER${NC}"
         if [[ ${#RESOURCE_GROUP_ARRAY[@]} -gt 0 ]]; then
@@ -3033,14 +3059,14 @@ main() {
     else
         log_info "Searching for resources containing: ${YELLOW}${NAME_PATTERN}${NC}"
     fi
-    
+
     if [[ -n "$EXCLUDE_SUBSCRIPTIONS" ]]; then
         log_info "Excluding subscription(s):"
         for sub in "${EXCLUDE_SUBSCRIPTION_ARRAY[@]}"; do
             log_info "  • ${YELLOW}$sub${NC}"
         done
     fi
-    
+
     if [[ -n "$EXCLUDE_PATTERNS" ]]; then
         log_info "Exclude matching resources:"
         for pattern in "${EXCLUDE_ARRAY[@]}"; do
@@ -3053,10 +3079,10 @@ main() {
     # Get current subscription context
     CURRENT_SUB=$(az account show --query id -o tsv)
     log_to_file "INFO" "Current subscription ID: $CURRENT_SUB"
-    
+
     # Cache subscription names upfront (avoids repeated az account show calls)
     cache_subscription_names
-    
+
     # Get subscriptions
     local subscriptions
     subscriptions=$(get_subscriptions)
@@ -3064,14 +3090,14 @@ main() {
         log_error "No subscriptions found"
         exit 1
     fi
-    
+
     if [[ -n "$TAG_FILTER" ]]; then
         discover_resources_by_tag "$TAG_FILTER"
     elif [[ -n "$RESOURCE_GROUPS" ]]; then
         # Resource group specific mode - scan within specified RGs
         log_info "Resource Group Mode: Scanning within specified resource group(s)"
         discover_resources_in_specific_rgs
-        
+
         # Skip regular resource discovery in subscription loop
         SKIP_REGULAR_DISCOVERY=true
     else
@@ -3082,7 +3108,7 @@ main() {
                 use_graph=true
             fi
         fi
-        
+
         if [[ "$use_graph" == true ]]; then
             # Graph handled resources and RGs; still need per-sub role assignments
             while IFS= read -r sub; do
@@ -3097,7 +3123,7 @@ main() {
                 if [[ -z "$sub" ]]; then
                     continue
                 fi
-                
+
                 if az account set --subscription "$sub" >/dev/null 2>&1; then
                     local sub_name
                     sub_name=$(get_sub_name "$sub")
@@ -3111,10 +3137,10 @@ main() {
         fi
         SKIP_REGULAR_DISCOVERY=false
     fi
-    
+
     az account set --subscription "$CURRENT_SUB" >/dev/null 2>/dev/null
     log_to_file "INFO" "Switched back to original subscription: $CURRENT_SUB"
-    
+
     # ALWAYS run tenant/management group level discoveries (unless excluded)
     # But skip if 'all' is excluded
     if ! is_service_excluded "all"; then
@@ -3139,14 +3165,14 @@ main() {
     else
         log_info "Skipping all service-specific discovery (--exclude-service all)"
     fi
-    
+
     echo ""
     log_to_file "INFO" "Discovery phase completed"
-    
+
     if [[ -n "$EXCLUDE_PATTERNS" ]]; then
         log_info "Applying exclude patterns: $EXCLUDE_PATTERNS"
         apply_exclude_filters
-        
+
         if [[ ${#EXCLUDED_IDS[@]} -gt 0 ]]; then
             log_info "Excluded ${#EXCLUDED_IDS[@]} resource(s) from deletion"
         else
@@ -3155,18 +3181,18 @@ main() {
     fi
     # --- Added deduplication step here ---
     deduplicate_resources
-    
 
-    
-    # --- Log info about resource groups with excluded resources (already tracked in should_exclude) --- 
+
+
+    # --- Log info about resource groups with excluded resources (already tracked in should_exclude) ---
     if [[ ${#RG_EXCLUDED_RESOURCES[@]} -gt 0 ]]; then
         log_info "Found ${#RG_EXCLUDED_RESOURCES[@]} excluded resource(s) in resource groups"
     fi
-    
+
     if [[ ${#ALL_IDS[@]} -eq 0 ]]; then
         RESOURCES_FOUND=false
     fi
-    
+
     if [[ "$RESOURCES_FOUND" == "false" ]]; then
         log_success "No matching resources found"
         echo "========================================================="
@@ -3174,7 +3200,7 @@ main() {
         log_summary
         exit 0
     fi
-    
+
     if [[ -n "$EXCLUDE_PATTERNS" && ${#EXCLUDED_IDS[@]} -gt 0 ]]; then
         log_warning "Excluded ${#EXCLUDED_IDS[@]} resource(s) matching patterns: $EXCLUDE_PATTERNS"
     fi
@@ -3182,31 +3208,41 @@ main() {
     echo "========================================================="
     echo "                      ${PURPLE}Summary Table${NC}                      "
     echo "========================================================="
-    
+
     log_success "Found ${#ALL_IDS[@]} matching resource(s) for deletion"
     if [[ ${#EXCLUDED_IDS[@]} -gt 0 ]]; then
         echo -e "${YELLOW}⚠️  Excluded ${#EXCLUDED_IDS[@]} resource(s)${NC}"
     fi
-    
+
     echo
     printf "%-55s %-50s %-25s %-40s\n" "-------------------------------------------------------" "--------------------------------------------------" "-------------------------" "----------------------------------------"
     printf "%-55s %-50s %-25s %-40s\n" "NAME" "TYPE" "SCOPE" "DETAILS"
     printf "%-55s %-50s %-25s %-40s\n" "-------------------------------------------------------" "--------------------------------------------------" "-------------------------" "----------------------------------------"
-    
+
     for row in "${SUMMARY_ROWS[@]}"; do
         IFS="|" read -r name type scope details <<< "$row"
         clean_name=$(echo "$name" | sed -E 's/\x1B\[[0-9;]*[mGK]//g')
         printf "%-55s %-50s %-25s %-40s\n" "$clean_name" "$type" "$scope" "$details"
         log_to_file "SUMMARY" "$clean_name | $type | $scope | $details"
+
+        # TSV EXPORT HOOK - Writing summary rows natively into TSV
+        if [[ -n "$TSV_FILE" ]]; then
+            clean_details=$(echo "$details" | tr '\t' ' ')
+            echo -e "${clean_name}\t${type}\t${scope}\t${clean_details}" >> "$TSV_FILE"
+        fi
     done
-    
-    # --- Display warning for resource groups that won't be deleted due to excluded resources --- 
+
+    if [[ -n "$TSV_FILE" && ${#SUMMARY_ROWS[@]} -gt 0 ]]; then
+        echo -e "${GREEN}✅ TSV export successful: saved ${#SUMMARY_ROWS[@]} records to $TSV_FILE${NC}"
+    fi
+
+    # --- Display warning for resource groups that won't be deleted due to excluded resources ---
     if [[ ${#RG_EXCLUDED_RESOURCES[@]} -gt 0 ]]; then
         echo ""
         echo "========================================================="
         echo "      Resource Groups with Excluded Resources            "
         echo "========================================================="
-        
+
         # Get unique resource groups
         declare -a unique_rgs=()
         for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
@@ -3215,17 +3251,17 @@ main() {
                 unique_rgs+=("$rg_name")
             fi
         done
-        
+
         for rg_name in "${unique_rgs[@]}"; do
             echo -e "${YELLOW}⚠️  Resource Group: $rg_name${NC}"
             echo "   Contains excluded resources:"
-            
+
             # Show unique resources for this RG
             declare -a shown_resources=()
             for item in "${RG_EXCLUDED_RESOURCES[@]}"; do
                 if [[ "$item" == "$rg_name|"* ]]; then
                     IFS="|" read -r _ excluded_resource excluded_type <<< "$item"
-                    
+
                     # Check if we've already shown this resource
                     local resource_key="$excluded_resource|$excluded_type"
                     if [[ ! " ${shown_resources[@]} " =~ " ${resource_key} " ]]; then
@@ -3240,7 +3276,7 @@ main() {
         echo "Remove the excluded resources first or adjust your exclude patterns."
         echo "========================================================="
     fi
-    
+
     if [[ "$DRY_RUN" == true ]]; then
         echo
         log_info "Dry-run completed. No resources were deleted."
@@ -3254,16 +3290,16 @@ main() {
         log_summary
         exit 0
     fi
-    
+
     # Enhanced confirmation with exclusion prompt
     confirm_delete
-    
+
     log_info "Starting ordered deletion process..."
-    
+
     local deleted_count=0
     local failed_count=0
-    
-    # --- Phase 1: Management Group Deployments --- 
+
+    # --- Phase 1: Management Group Deployments ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "ManagementGroupDeployment" ]]; then
@@ -3276,8 +3312,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 2: Policy Remediations --- 
+
+    # --- Phase 2: Policy Remediations ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "PolicyRemediation" ]]; then
@@ -3290,8 +3326,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 3: Policy Assignments --- 
+
+    # --- Phase 3: Policy Assignments ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "PolicyAssignment" ]]; then
@@ -3304,8 +3340,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 4: Management Group Role Assignments --- 
+
+    # --- Phase 4: Management Group Role Assignments ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "ManagementGroupRoleAssignment" ]]; then
@@ -3318,8 +3354,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 5: Azure AD Diagnostic Settings --- 
+
+    # --- Phase 5: Azure AD Diagnostic Settings ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "DirectoryDiagnosticSetting" ]]; then
@@ -3332,8 +3368,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 6: Subscription Role Assignments --- 
+
+    # --- Phase 6: Subscription Role Assignments ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "SubscriptionRoleAssignment" ]]; then
@@ -3346,8 +3382,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 7: Role Assignments --- 
+
+    # --- Phase 7: Role Assignments ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "RoleAssignment" || "$resource_type" == "UnknownRoleAssignment" ]]; then
@@ -3363,8 +3399,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 8: Custom Roles --- 
+
+    # --- Phase 8: Custom Roles ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "CustomRole" ]]; then
@@ -3378,8 +3414,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 9: Regular Resources --- 
+
+    # --- Phase 9: Regular Resources ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" != "ResourceGroup" && \
@@ -3393,7 +3429,7 @@ main() {
               "$resource_type" != "PolicyAssignment" && \
               "$resource_type" != "PolicyRemediation" && \
               "$resource_type" != "ManagementGroupDeployment" && \
-              "$resource_type" != "DirectoryDiagnosticSetting" ]]; then    
+              "$resource_type" != "DirectoryDiagnosticSetting" ]]; then
             local details=$(get_resource_details "$id")
             IFS="|" read -r name type sub <<< "$details"
             log_info "Deleting Resource: $name ($type)"
@@ -3404,8 +3440,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 10: Service Principals --- 
+
+    # --- Phase 10: Service Principals ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "EnterpriseApplication" ]]; then
@@ -3418,8 +3454,8 @@ main() {
             fi
         fi
     done
-    
-    # --- Phase 11: Resource Groups --- 
+
+    # --- Phase 11: Resource Groups ---
     for id in "${ALL_IDS[@]}"; do
         local resource_type=$(get_resource_type "$id")
         if [[ "$resource_type" == "ResourceGroup" ]]; then
@@ -3432,7 +3468,7 @@ main() {
             fi
         fi
     done
-    
+
     echo
     if [[ $failed_count -eq 0 ]]; then
         echo "========================================================="
@@ -3442,17 +3478,17 @@ main() {
         log_warning "Deletion completed with $failed_count failure(s)"
         log_success "Successfully processed $deleted_count resource(s)"
     fi
-    
+
     if [[ ${#EXCLUDED_IDS[@]} -gt 0 ]]; then
         log_info "${#EXCLUDED_IDS[@]} resource(s) were excluded from deletion"
     fi
-    
+
     log_warning "Note: Some deletions may run asynchronously. Check Azure Portal for final status or rerun it again after 30 seconds"
     echo ""
-    
-    # --- Write summary to log file --- 
+
+    # --- Write summary to log file ---
     log_summary
 }
 
-# --- Run main function --- 
+# --- Run main function ---
 main "$@"
