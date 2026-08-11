@@ -453,7 +453,7 @@ get_sub_name() {
         echo "${SUB_NAME_CACHE[$sub]}"
     else
         local name
-        name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null || echo "Unknown")
+        name=$(az account show --subscription "$sub" --query 'name' -o tsv 2>/dev/null | tr -d '\r' || echo "Unknown")
         SUB_NAME_CACHE["$sub"]="$name"
         echo "$name"
     fi
@@ -1572,6 +1572,9 @@ discover_directory_diagnostic_settings() {
 discover_subscription_role_assignments() {
     local sub="$1"
     local sub_name="$2"
+
+    # exit early if sub not provided
+    [[ -z "$sub" ]] && return
 
     # Skip if subscriptions are excluded
     if is_service_excluded "subscriptions"; then
