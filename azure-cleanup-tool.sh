@@ -98,32 +98,32 @@ log_to_file() {
 
 # --- Logging functions with file logging ---
 log_info() {
-    echo -e "${BLUE}ℹ️  $*${NC}"
+    echo -e "${BLUE}ℹ️  $*${NC}" >&2
     log_to_file "INFO" "$*"
 }
 log_success() {
-    echo -e "${GREEN}✅ $*${NC}"
+    echo -e "${GREEN}✅ $*${NC}" >&2
     log_to_file "SUCCESS" "$*"
 }
 log_warning() {
-    echo -e "${YELLOW}⚠️  $*${NC}"
+    echo -e "${YELLOW}⚠️  $*${NC}" >&2
     log_to_file "WARNING" "$*"
 }
 log_error() {
-    echo -e "${RED}❌ $*${NC}"
+    echo -e "${RED}❌ $*${NC}" >&2
     log_to_file "ERROR" "$*"
 }
 log_debug() {
-    echo -e "${CYAN}ℹ️  $*${NC}"
+    echo -e "${CYAN}ℹ️  $*${NC}" >&2
     log_to_file "DEBUG" "$*"
 }
 log_special() {
-    echo -e "${PURPLE}🔐 $*${NC}"
+    echo -e "${PURPLE}🔐 $*${NC}" >&2
     log_to_file "SPECIAL" "$*"
 }
 log_audit() {
     local message="$1"
-    echo -e "${ORANGE}📊 $*${NC}"
+    echo -e "${ORANGE}📊 $*${NC}" >&2
     log_to_file "AUDIT" "$*"
 }
 
