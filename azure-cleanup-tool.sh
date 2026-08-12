@@ -738,7 +738,7 @@ get_subscriptions() {
     else
         log_info "Getting all enabled subscriptions..."
         local subs
-        subs=$(az account list --query '[?state==`Enabled`].id' -o tsv 2>/dev/null || echo "")
+        subs=$(az account list --query '[?state==`Enabled`].id' -o tsv 2>/dev/null | tr -d '\r' || echo "")
         if [[ -z "$subs" ]]; then
             log_error "No enabled subscriptions found or unable to list subscriptions"
             exit 1
@@ -1336,7 +1336,7 @@ discover_management_group_role_assignments() {
     log_info "Searching for management group role assignments..."
 
     local mgs
-    mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null || echo "")
+    mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null | tr -d '\r' || echo "")
 
     if [[ -z "$mgs" ]]; then
         log_debug "No management groups found or access denied"
@@ -1621,7 +1621,7 @@ discover_policy_assignments() {
     log_info "Searching for policy assignments..."
 
     local mgs
-    mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null || echo "")
+    mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null | tr -d '\r' || echo "")
 
     for mg in $mgs; do
         log_debug "Checking policy assignments in management group: $mg"
@@ -1810,7 +1810,7 @@ discover_management_group_deployments() {
     log_info "Searching for management group deployments..."
 
     local mgs
-    mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null || echo "")
+    mgs=$(az account management-group list --query '[].name' -o tsv 2>/dev/null | tr -d '\r' || echo "")
 
     if [[ -z "$mgs" ]]; then
         log_debug "No management groups found or access denied"
